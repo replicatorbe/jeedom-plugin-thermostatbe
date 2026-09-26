@@ -191,7 +191,7 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 							<legend><i class="fas fa-bell"></i> {{Notifications}}</legend>
 							<?php
 							thermostatbeCmdField('notify_cmd', '{{Prévenir par}}', 'action', false,
-								'{{Facultatif. Une commande de message : Telegram, SMS, notification de l\'appli mobile. Un message par épisode — sondes perdues puis revenues, fenêtre ouverte trop longtemps, chaudière ou clim qui ne suit pas les ordres.}}');
+								'{{Facultatif. Une commande de message : Telegram, SMS, notification de l\'appli mobile. Un message par épisode — sondes perdues puis revenues, fenêtre ouverte trop longtemps, chaudière ou clim qui ne suit pas les ordres, chaudière commandée par un autre système, chauffe sans effet.}}');
 							?>
 							<div class="form-group">
 								<label class="col-sm-4 control-label">{{Fenêtre ouverte depuis}}</label>
@@ -205,6 +205,17 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 									<span class="help-block" style="margin:0;">{{0 : jamais de message pour une fenêtre.}}</span>
 								</div>
 							</div>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Chauffe sans effet après}}
+									<sup><i class="fas fa-question-circle" title="{{Si un appareil tourne depuis cette durée sans que la température ait gagné 0,3 °C (ou perdu, en froid), le thermostat le note au journal et prévient : fenêtre ouverte, chaudière en défaut, sonde mal placée. 0 : jamais.}}"></i></sup>
+								</label>
+								<div class="col-sm-3">
+									<div class="input-group">
+										<input type="text" class="eqLogicAttr form-control roundedLeft" data-l1key="configuration" data-l2key="notify_ineffective" placeholder="90">
+										<span class="input-group-addon roundedRight">{{min}}</span>
+									</div>
+								</div>
+							</div>
 						</fieldset>
 					</form>
 				</div>
@@ -214,6 +225,8 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 						<a class="btn btn-default btn-xs pull-right" id="bt_thermostatbeBoost" style="margin-right:6px;"><i class="fas fa-rocket"></i> <span>{{Boost}}</span></a>
 					</legend>
 					<div id="div_thermostatbeStatus" class="well well-sm">{{Enregistrez le thermostat pour voir sa première décision.}}</div>
+					<legend><i class="fas fa-history"></i> {{Journal}}</legend>
+					<div id="div_thermostatbeJournal" class="well well-sm" style="max-height:360px;overflow-y:auto;"><span class="text-muted">{{Rien pour l'instant.}}</span></div>
 				</div>
 			</div>
 

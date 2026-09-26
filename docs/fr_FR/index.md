@@ -54,9 +54,24 @@ appli mobile). Un message par épisode : sondes perdues puis revenues, fenêtre
 ouverte depuis plus de 30 minutes (réglable, 0 pour jamais), relais de la
 chaudière ou clim qui ne suit pas les ordres.
 
+Deux surveillances notent au journal et préviennent :
+
+- **Un autre pilote pour la chaudière** : si le relais change d'état sans ordre
+  du thermostat (tablette Home Assistant, scénario oublié, appli Shelly), le
+  changement est signalé — au plus un message par demi-heure — et le thermostat
+  reprend la main aussitôt. Il faut avoir choisi l'*État du relais*.
+- **Chauffe sans effet** : un appareil qui tourne depuis 90 minutes (réglable,
+  0 pour jamais) sans que la température ait gagné 0,3 °C — ou perdu, en
+  froid. Fenêtre ouverte sans capteur, chaudière en défaut, sonde mal placée.
+
 Le panneau **En ce moment** montre la dernière décision et sa raison, en toutes
 lettres : « Froid bloqué : on chauffait encore il y a peu, verrou encore
 7 h 12 ».
+
+Le **Journal**, juste en dessous, garde les 30 derniers événements avec leur
+heure : changements d'état et leur raison, réglages modifiés (mode, consignes,
+boost, programmation), conditions devenues vraies ou levées, essais, alertes.
+C'est là qu'on comprend pourquoi la maison a chauffé à 3 h du matin.
 
 ### Onglet Appareils
 
@@ -205,12 +220,18 @@ Pour forcer un appareil selon les prix du moment, choisissez simplement
 | Activer / Suspendre la programmation | action | Programmation active, Prochain changement en info |
 | Chaudière / Clim chaud / Clim froid du jour | info | Minutes de marche, historisées |
 | Coût estimé du jour | info | En €, si puissances et prix sont renseignés |
+| État (code) | info | 0 repos, 1 chaudière, 2 clim en chaud, 3 clim en froid — historisé, à superposer à la température dans un graphique |
+| Consigne effective | info | La consigne réellement appliquée, boost, conditions et hors-gel compris — historisée |
+| Conditions actives | info | Les noms des conditions vraies |
+| Alerte sondes | info | « 1 sonde muette sur 3 », vide quand toutes répondent |
 
 ## Tuile du tableau de bord
 
 La tuile montre la température, l'état (orange en chauffe, bleu en froid), les
 deux consignes réglables par crans de 0,5 °C — la consigne du côté actif est
-mise en avant —, le mode, le préréglage, le bouton Boost, la raison de la
+mise en avant, avec la consigne effective quand un boost ou une condition
+l'éloigne de la vôtre (« 20,0 → 22,0 ») —, des pastilles *fenêtre ouverte*,
+*condition active* et *sonde muette*, le mode, le préréglage, le bouton Boost, la raison de la
 décision et, en pied, la température extérieure, la saison et le temps de marche
 du jour. Sur mobile, c'est le widget standard de Jeedom.
 

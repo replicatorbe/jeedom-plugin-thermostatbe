@@ -12,6 +12,8 @@
       <div class="tbw-chip" data-role="chip"><i class="fas fa-pause" data-role="chip-icon"></i> <span data-role="chip-text"></span></div>
     </div>
 
+    <div class="tbw-badges" data-role="badges"></div>
+
     <div class="tbw-sp" data-side="heat">
       <i class="fas fa-fire tbw-sp-icon" title="{{Chauffer jusqu'à}}"></i>
       <button type="button" class="tbw-btn" data-step="-0.5" data-side="heat" title="{{Moins}}"><i class="fas fa-minus"></i></button>
@@ -56,6 +58,10 @@
     .tbw .tbw-select option { color: #000; }
     .tbw .tbw-boost { width: 100%; margin-top: 6px; height: 28px; border: 0; border-radius: 5px; background: rgba(128,128,128,.22); color: inherit; }
     .tbw .tbw-boost.tbw-on { background: #d6332b; color: #fff; }
+    .tbw .tbw-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+    .tbw .tbw-badges:empty { display: none; }
+    .tbw .tbw-badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: #e0a800; color: #222; }
+    .tbw .tbw-badge.tbw-badge-alert { background: #d6332b; color: #fff; }
     .tbw .tbw-reason { font-size: 11px; margin-top: 6px; opacity: .85; line-height: 1.3; }
     .tbw .tbw-foot { font-size: 11px; margin-top: 4px; opacity: .6; }
   </style>
@@ -125,6 +131,15 @@
         $('heat').textContent = fmt(pending.heat !== null ? pending.heat : num('heat_setpoint'))
         $('cool').textContent = fmt(pending.cool !== null ? pending.cool : num('cool_setpoint'))
         const side = activeSide()
+        /* La consigne qui s'applique vraiment, quand un boost ou une
+           condition l'éloigne de la vôtre : « 20,0 → 22,0 ». */
+        const effective = num('effective_setpoint')
+        if (side !== '' && pending[side] === null && effective !== null) {
+          const own = num(side + '_setpoint')
+          if (own !== null && Math.abs(effective - own) >= 0.05) {
+            $(side).textContent = fmt(own) + ' → ' + fmt(effective)
+          }
+        }
         widget.querySelectorAll('.tbw-sp').forEach(function (_row) {
           _row.classList.toggle('tbw-active', _row.getAttribute('data-side') === side)
         })
@@ -139,6 +154,22 @@
         $('boost').classList.toggle('tbw-on', boost)
         $('boost-text').textContent = boost ? '{{Boost jusqu\'à}} ' + val('boost_until') + ' — {{arrêter}}' : '{{Boost}}'
         $('reason').textContent = val('reason')
+        /* Ce qui mérite d'être vu sans ouvrir la page : une fenêtre ouverte,
+           une condition qui change la marche, une sonde qui s'est tue. */
+        const badges = $('badges')
+        badges.innerHTML = ''
+        const badge = function (_icon, _text, _alert) {
+          const span = document.createElement('span')
+          span.className = 'tbw-badge' + (_alert ? ' tbw-badge-alert' : '')
+          const icon = document.createElement('i')
+          icon.className = 'fas ' + _icon
+          span.appendChild(icon)
+          span.appendChild(document.createTextNode(' ' + _text))
+          badges.appendChild(span)
+        }
+        if (val('window') === '1') { badge('fa-window-maximize', '{{Fenêtre ouverte}}', false) }
+        if (val('conditions') !== '') { badge('fa-user-shield', val('conditions'), false) }
+        if (val('sensor_alert') !== '') { badge('fa-thermometer-empty', val('sensor_alert'), true) }
         const foot = []
         if (num('outdoor') !== null) { foot.push('{{Dehors}} ' + fmt(num('outdoor')) + ' °C') }
         if (val('season') !== '') { foot.push('{{saison}} ' + val('season').toLowerCase()) }

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5
+
+- **Autre pilote pour la chaudière** : un relais qui change d'état sans ordre
+  du thermostat est signalé, et le thermostat reprend la main.
+- **Chauffe sans effet** : alerte quand un appareil tourne longtemps sans que la
+  température bouge.
+- **Journal des décisions** sur la page : les 30 derniers événements, avec leur
+  raison.
+- Nouvelles infos historisées : **État (code)** pour les graphiques,
+  **Consigne effective** ; et **Conditions actives**, **Alerte sondes**.
+- Tuile : pastilles fenêtre ouverte, condition active, sonde muette, et
+  consigne effective affichée quand elle diffère de la vôtre.
+
 ## 0.4
 
 - Consigne fixe facultative envoyée à la clim, en chaud et en froid (par

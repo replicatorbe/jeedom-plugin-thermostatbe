@@ -58,6 +58,7 @@ function thermostatbeShowStatus(_status) {
   if (_status && _status.runtime) {
     thermostatbeFillRuntime(_status.runtime)
   }
+  thermostatbeShowJournal(_status ? _status.journal : null)
   if (!_status || !_status.target) {
     root.appendChild(thermostatbeText('span', '{{Pas encore de décision : enregistrez le thermostat, ou cliquez sur « Évaluer maintenant ».}}'))
     return
@@ -213,6 +214,33 @@ function thermostatbeRequest(_data, _success, _failure) {
       _success(data.result)
     }
   })
+}
+
+/* Le journal des décisions, le plus récent en haut. Les alertes en couleur :
+   c'est ce qu'on vient chercher quand quelque chose a surpris. */
+var thermostatbeJournalClass = { alert: 'text-danger', user: 'text-primary', state: '', info: 'text-muted' }
+
+function thermostatbeShowJournal(_entries) {
+  var root = document.getElementById('div_thermostatbeJournal')
+  if (!root) { return }
+  root.innerHTML = ''
+  if (!_entries || _entries.length === 0) {
+    root.appendChild(thermostatbeText('span', '{{Rien pour l\'instant.}}', 'text-muted'))
+    return
+  }
+  var table = document.createElement('table')
+  table.className = 'table table-condensed'
+  table.style.margin = '0'
+  _entries.forEach(function (entry) {
+    var tr = document.createElement('tr')
+    var when = thermostatbeText('td', entry.when, 'text-muted')
+    when.style.whiteSpace = 'nowrap'
+    when.style.width = '1%'
+    tr.appendChild(when)
+    tr.appendChild(thermostatbeText('td', entry.text, thermostatbeJournalClass[entry.kind] || ''))
+    table.appendChild(tr)
+  })
+  root.appendChild(table)
 }
 
 function thermostatbeLoadStatus(_refresh) {

@@ -84,11 +84,26 @@ class thermostatbe extends eqLogic {
      * main. */
     const TEST_DURATION = 120;
 
+    /* Les entrées gardées dans le journal des décisions. */
+    const JOURNAL_SIZE = 30;
+
+    /* Chauffe inefficace : la température doit avoir gagné au moins ceci sur
+     * la durée réglée, sans quoi quelque chose cloche. */
+    const EFFECT_MIN_GAIN = 0.3;
+
+    /* Deux alertes « autre pilote » au plus par demi-heure : une tablette qui
+     * se bat avec le thermostat changerait le relais chaque minute. */
+    const FOREIGN_NOTIFY_EVERY = 1800;
+
+    /* Le code numérique de chaque état, pour les graphiques. */
+    const STATE_CODES = array('idle' => 0, 'heat_boiler' => 1, 'heat_ac' => 2, 'cool_ac' => 3);
+
     /* Les infos que la tuile du tableau de bord affiche, et les actions
      * qu'elle joue. */
     const WIDGET_INFOS = array('temperature', 'heat_setpoint', 'cool_setpoint', 'mode', 'season', 'state',
                                'reason', 'boost', 'boost_until', 'outdoor', 'device', 'preset', 'window',
-                               'runtime_boiler', 'runtime_ac_heat', 'runtime_ac_cool', 'cost_today');
+                               'runtime_boiler', 'runtime_ac_heat', 'runtime_ac_cool', 'cost_today',
+                               'conditions', 'sensor_alert', 'effective_setpoint');
     const WIDGET_ACTIONS = array('set_heat_setpoint', 'set_cool_setpoint', 'set_mode', 'set_preset',
                                  'boost_on', 'boost_off', 'refresh');
 
@@ -172,6 +187,8 @@ class thermostatbe extends eqLogic {
         }
         $minutes = thermostatbeEngine::number($this->getConfiguration('notify_window', ''));
         $this->setConfiguration('notify_window', ($minutes === null) ? 30 : max(0, min(1440, (int) $minutes)));
+        $minutes = thermostatbeEngine::number($this->getConfiguration('notify_ineffective', ''));
+        $this->setConfiguration('notify_ineffective', ($minutes === null) ? 90 : max(0, min(600, (int) $minutes)));
         if ($this->getDisplay('width') == '') {
             $this->setDisplay('width', '300px');
         }
@@ -205,10 +222,11 @@ class thermostatbe extends eqLogic {
         cache::delete($this->sentKey());
         cache::delete($this->stateKey() . '::saved');
         config::remove($this->stateKey(), __CLASS__);
-        foreach (array('boost', 'schedule_on', 'schedule_last', 'usage') as $name) {
+        foreach (array('boost', 'schedule_on', 'schedule_last', 'usage', 'journal') as $name) {
             config::remove($this->rtKey($name), __CLASS__);
         }
-        foreach (array('usage', 'test', 'notified::safety', 'notified::window', 'notified::boiler', 'notified::ac') as $name) {
+        foreach (array('usage', 'test', 'notified::safety', 'notified::window', 'notified::boiler', 'notified::ac',
+                       'journal', 'boiler_seen', 'foreign', 'effect', 'conditions_seen') as $name) {
             cache::delete($this->rtKey($name));
         }
         message::removeAll(__CLASS__, 'safety' . $this->getId());
@@ -221,7 +239,7 @@ class thermostatbe extends eqLogic {
         /* Les commandes citées par les conditions aussi : armer l'alarme doit
          * couper le chauffage tout de suite, pas à la minute suivante. */
         $ids = array_values(array_unique(array_merge($this->cmdIds('indoor_sensors'), $this->cmdIds('windows'),
-                                                     $this->conditionCmdIds())));
+                                                     $this->conditionCmdIds(), $this->cmdIds('boiler_state'))));
         if ($this->getIsEnable() != 1 || count($ids) == 0) {
             if (is_object($listener)) {
                 $listener->remove();
@@ -342,6 +360,15 @@ class thermostatbe extends eqLogic {
             array('logicalId' => 'cost_today', 'name' => __('Coût estimé du jour', __FILE__),
                   'type' => 'info', 'subType' => 'numeric', 'generic' => '',
                   'visible' => 0, 'historized' => 1, 'unite' => '€'),
+            array('logicalId' => 'state_code', 'name' => __('État (code)', __FILE__),
+                  'type' => 'info', 'subType' => 'numeric', 'generic' => '', 'visible' => 0, 'historized' => 1),
+            array('logicalId' => 'effective_setpoint', 'name' => __('Consigne effective', __FILE__),
+                  'type' => 'info', 'subType' => 'numeric', 'generic' => '',
+                  'visible' => 0, 'historized' => 1, 'unite' => '°C'),
+            array('logicalId' => 'conditions', 'name' => __('Conditions actives', __FILE__),
+                  'type' => 'info', 'subType' => 'string', 'generic' => '', 'visible' => 0),
+            array('logicalId' => 'sensor_alert', 'name' => __('Alerte sondes', __FILE__),
+                  'type' => 'info', 'subType' => 'string', 'generic' => '', 'visible' => 0),
             array('logicalId' => 'refresh', 'name' => __('Rafraîchir', __FILE__),
                   'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 0),
         );
@@ -485,6 +512,21 @@ class thermostatbe extends eqLogic {
         }
         $this->save(true);
         log::add(__CLASS__, 'info', $this->getHumanName() . ' : ' . $_key . ' = ' . $_value);
+        switch ($_key) {
+            case 'mode':
+                $this->journal(sprintf(__('Mode : %s', __FILE__), thermostatbeEngine::modeLabel($_value)), 'user');
+                break;
+            case 'source':
+                $this->journal(sprintf(__('Source de chauffe : %s', __FILE__), thermostatbeEngine::sourceLabel($_value)), 'user');
+                break;
+            case 'preset':
+                $this->journal(sprintf(__('Préréglage : %s', __FILE__), self::presetLabel($_value)), 'user');
+                break;
+            default:
+                $this->journal(sprintf(__('Consignes : chauffe %s, froid %s', __FILE__),
+                    thermostatbeEngine::formatTemperature($this->getConfiguration('heat_setpoint')),
+                    thermostatbeEngine::formatTemperature($this->getConfiguration('cool_setpoint'))), 'user');
+        }
     }
 
     /* ================================================== ÉTAT HORS FORMULAIRE */
@@ -508,12 +550,14 @@ class thermostatbe extends eqLogic {
         $minutes = $this->settings()['boost_minutes'];
         config::save($this->rtKey('boost'), time() + (int) round($minutes * 60), __CLASS__);
         log::add(__CLASS__, 'info', $this->getHumanName() . ' : ' . sprintf(__('boost pour %d min', __FILE__), $minutes));
+        $this->journal(sprintf(__('Boost pour %d min', __FILE__), $minutes), 'user');
         $this->evaluate('command');
     }
 
     public function stopBoost() {
         config::remove($this->rtKey('boost'), __CLASS__);
         log::add(__CLASS__, 'info', $this->getHumanName() . ' : ' . __('boost arrêté', __FILE__));
+        $this->journal(__('Boost arrêté', __FILE__), 'user');
         $this->evaluate('command');
     }
 
@@ -529,6 +573,7 @@ class thermostatbe extends eqLogic {
         }
         log::add(__CLASS__, 'info', $this->getHumanName() . ' : '
             . ($_enabled ? __('programmation active', __FILE__) : __('programmation suspendue', __FILE__)));
+        $this->journal($_enabled ? __('Programmation active', __FILE__) : __('Programmation suspendue', __FILE__), 'user');
         $this->evaluate('command');
     }
 
@@ -550,6 +595,7 @@ class thermostatbe extends eqLogic {
         config::save($this->rtKey('schedule_last'), $due['at'], __CLASS__);
         log::add(__CLASS__, 'info', $this->getHumanName() . ' : '
             . sprintf(__('programmation de %s : %s', __FILE__), $due['slot']['time'], self::presetLabel($due['slot']['preset'])));
+        $this->journal(sprintf(__('Programmation de %s', __FILE__), $due['slot']['time']), 'info');
         $this->setRuntime('preset', $due['slot']['preset'], false);
     }
 
@@ -995,6 +1041,7 @@ class thermostatbe extends eqLogic {
         if ((int) config::byKey($this->rtKey('boost'), __CLASS__, 0) > 0 && $this->boostUntil() == 0) {
             config::remove($this->rtKey('boost'), __CLASS__);
             log::add(__CLASS__, 'info', $this->getHumanName() . ' : ' . __('fin du boost', __FILE__));
+            $this->journal(__('Fin du boost', __FILE__), 'info');
         }
         $decision = thermostatbeEngine::decide($settings, $inputs, $state);
         /* Une condition qui change les consignes ne se voit pas dans la raison
@@ -1027,11 +1074,17 @@ class thermostatbe extends eqLogic {
             log::add(__CLASS__, 'info', $this->getHumanName() . ' : '
                 . thermostatbeEngine::targetLabel($previous['target']) . ' → '
                 . thermostatbeEngine::targetLabel($decision['target']) . ' — ' . $decision['reason']);
+            $this->journal(thermostatbeEngine::targetLabel($decision['target']) . ' — ' . $decision['reason'], 'state');
         } else {
             log::add(__CLASS__, 'debug', $this->getHumanName() . ' [' . $_origin . '] ' . $decision['reason']);
         }
+        $this->watchConditions($active);
 
+        /* Avant apply() : un rappel envoyé dans ce passage masquerait le
+         * changement que le relais vient de faire sans nous. */
+        $this->watchBoiler();
         $this->apply($previous['target'], $decision);
+        $this->watchEffect($decision, $indoor['value']);
         $this->notifySafety($decision);
         $this->notifyEvents($decision, $windowFor);
 
@@ -1193,6 +1246,173 @@ class thermostatbe extends eqLogic {
         $this->checkAndUpdateCmd('runtime_ac_heat', round($_usage['ac_heat']));
         $this->checkAndUpdateCmd('runtime_ac_cool', round($_usage['ac_cool']));
         $this->checkAndUpdateCmd('cost_today', round($_usage['cost'], 2));
+        $this->checkAndUpdateCmd('state_code', isset(self::STATE_CODES[$target]) ? self::STATE_CODES[$target] : 0);
+        /* La consigne qui s'applique vraiment — boost, condition, hors-gel
+         * compris. Rien quand le thermostat est coupé : un 0 écraserait
+         * l'échelle du graphique. */
+        if ($_decision['setpoint'] !== null) {
+            $this->checkAndUpdateCmd('effective_setpoint', $_decision['setpoint']);
+        }
+        $this->checkAndUpdateCmd('conditions', implode(', ', array_map(function ($_condition) {
+            return $_condition['name'];
+        }, $_decision['conditions'])));
+        $this->checkAndUpdateCmd('sensor_alert', self::sensorAlert($_decision['sensors']));
+    }
+
+    /* « 1 sonde muette sur 3 », ou rien quand toutes répondent. */
+    public static function sensorAlert($_sensors) {
+        $silent = 0;
+        foreach ($_sensors as $sensor) {
+            if ($sensor['value'] === null) {
+                $silent++;
+            }
+        }
+        if ($silent == 0) {
+            return '';
+        }
+        return sprintf(($silent > 1) ? __('%d sondes muettes sur %d', __FILE__) : __('%d sonde muette sur %d', __FILE__),
+                       $silent, count($_sensors));
+    }
+
+    /* =============================================================== JOURNAL */
+
+    /*
+     * Le journal des décisions : les derniers changements d'état, de réglage
+     * et les alertes, avec leur raison, pour comprendre après coup pourquoi
+     * la maison a chauffé à 3 h du matin. En base et non dans le journal du
+     * plugin : ce dernier est souvent réglé sur « erreurs seulement », et
+     * tourne.
+     */
+    public function journal($_text, $_kind = 'info') {
+        $entries = $this->journalEntries();
+        array_unshift($entries, array('at' => time(), 'kind' => $_kind, 'text' => (string) $_text));
+        $entries = array_slice($entries, 0, self::JOURNAL_SIZE);
+        cache::set($this->rtKey('journal'), $entries);
+        config::save($this->rtKey('journal'), json_encode($entries, JSON_UNESCAPED_UNICODE), __CLASS__);
+    }
+
+    public function journalEntries() {
+        $entries = cache::byKey($this->rtKey('journal'))->getValue(null);
+        if (!is_array($entries)) {
+            $entries = json_decode((string) config::byKey($this->rtKey('journal'), __CLASS__, ''), true);
+        }
+        return is_array($entries) ? $entries : array();
+    }
+
+    /* Une condition qui devient vraie ou fausse se note au journal. */
+    private function watchConditions($_active) {
+        $names = array();
+        foreach ($_active as $condition) {
+            $names[$condition['name']] = self::effectLabel($condition['effect']);
+        }
+        $seen = cache::byKey($this->rtKey('conditions_seen'))->getValue(null);
+        cache::set($this->rtKey('conditions_seen'), $names);
+        if (!is_array($seen)) {
+            return;
+        }
+        foreach ($names as $name => $effect) {
+            if (!isset($seen[$name])) {
+                $this->journal(sprintf(__('Condition « %s » vraie : %s', __FILE__), $name, $effect), 'info');
+            }
+        }
+        foreach ($seen as $name => $effect) {
+            if (!isset($names[$name])) {
+                $this->journal(sprintf(__('Condition « %s » levée', __FILE__), $name), 'info');
+            }
+        }
+    }
+
+    /* ========================================================== SURVEILLANCE */
+
+    /*
+     * Un autre pilote pour la chaudière : le relais a changé d'état sans que
+     * le thermostat l'ait commandé — la tablette Home Assistant, un scénario
+     * oublié, quelqu'un sur l'appli Shelly. Le changement est noté, signalé,
+     * et le thermostat reprend la main tout de suite.
+     */
+    private function watchBoiler() {
+        $id = $this->cmdId('boiler_state');
+        if ($id === null) {
+            return;
+        }
+        $sensor = self::readSensor($id);
+        if ($sensor['value'] === null) {
+            return;
+        }
+        $value = ((int) $sensor['value'] == 1) ? 1 : 0;
+        $seenKey = $this->rtKey('boiler_seen');
+        $seen = cache::byKey($seenKey)->getValue(null);
+        cache::set($seenKey, $value);
+        if ($seen === null || (int) $seen == $value) {
+            return;
+        }
+        $sent = cache::byKey($this->sentKey())->getValue(array());
+        if (!is_array($sent) || !isset($sent['boiler']) || (int) $sent['boiler'] == $value) {
+            return;
+        }
+        $now = time();
+        /* Un ordre à nous encore en route, ou un essai lancé depuis la page. */
+        if ($now - (int) $sent['boiler_at'] < 30 || (int) cache::byKey($this->rtKey('test'))->getValue(0) >= $now) {
+            return;
+        }
+        $what = $value ? __('allumé', __FILE__) : __('éteint', __FILE__);
+        $text = sprintf(__('Le relais de la chaudière a été %s sans ordre du thermostat : un autre système la pilote encore (Home Assistant ?). Le thermostat reprend la main.', __FILE__), $what);
+        log::add(__CLASS__, 'warning', $this->getHumanName() . ' : ' . $text);
+        $this->journal($text, 'alert');
+        $last = (int) cache::byKey($this->rtKey('foreign'))->getValue(0);
+        if ($now - $last >= self::FOREIGN_NOTIFY_EVERY) {
+            cache::set($this->rtKey('foreign'), $now);
+            $this->sendNotification($text);
+        }
+        /* Ce qu'on croyait avoir envoyé n'est plus vrai : le rappel qui suit
+         * dans ce passage voit l'écart et renvoie l'ordre du thermostat. */
+        $sent['boiler'] = $value;
+        cache::set($this->sentKey(), $sent);
+    }
+
+    /*
+     * Une chauffe qui ne sert à rien : l'appareil tourne depuis la durée
+     * réglée et la température n'a pas gagné EFFECT_MIN_GAIN. Fenêtre ouverte
+     * sans capteur, chaudière en sécurité, sonde au soleil ou loin de
+     * l'émetteur : le thermostat ne peut pas savoir laquelle, il prévient.
+     *
+     * La fenêtre de mesure glisse : chaque fois que le gain est atteint, on
+     * repart de la température du moment. Une longue chauffe qui progresse
+     * lentement mais sûrement ne déclenche donc rien.
+     */
+    private function watchEffect($_decision, $_indoor) {
+        $key = $this->rtKey('effect');
+        $minutes = (int) $this->getConfiguration('notify_ineffective', 90);
+        $target = $_decision['target'];
+        if ($minutes <= 0 || $target == thermostatbeEngine::IDLE || $_indoor === null) {
+            cache::delete($key);
+            return;
+        }
+        $now = time();
+        $effect = cache::byKey($key)->getValue(null);
+        if (!is_array($effect) || $effect['target'] != $target) {
+            cache::set($key, array('target' => $target, 'since' => $now, 'start' => $_indoor, 'alerted' => 0));
+            return;
+        }
+        $heating = thermostatbeEngine::isHeating($target);
+        $gain = $heating ? $_indoor - $effect['start'] : $effect['start'] - $_indoor;
+        if ($gain >= self::EFFECT_MIN_GAIN) {
+            cache::set($key, array('target' => $target, 'since' => $now, 'start' => $_indoor, 'alerted' => 0));
+            return;
+        }
+        if ($effect['alerted'] == 1 || $now - $effect['since'] < $minutes * 60) {
+            return;
+        }
+        $text = sprintf($heating
+            ? __('%s depuis %d min sans que la température monte (%s → %s). Fenêtre ouverte, appareil en défaut, sonde mal placée ?', __FILE__)
+            : __('%s depuis %d min sans que la température baisse (%s → %s). Fenêtre ouverte, clim en défaut, sonde au soleil ?', __FILE__),
+            thermostatbeEngine::targetLabel($target), round(($now - $effect['since']) / 60),
+            thermostatbeEngine::formatTemperature($effect['start']), thermostatbeEngine::formatTemperature($_indoor));
+        log::add(__CLASS__, 'warning', $this->getHumanName() . ' : ' . $text);
+        $this->journal($text, 'alert');
+        $this->sendNotification($text);
+        $effect['alerted'] = 1;
+        cache::set($key, $effect);
     }
 
     /*
@@ -1204,6 +1424,7 @@ class thermostatbe extends eqLogic {
         $key = 'safety' . $this->getId();
         if ($_decision['status'] == 'safety') {
             if (cache::byKey('thermostatbe::safety::' . $this->getId())->getValue(0) == 0) {
+                $this->journal($_decision['reason'], 'alert');
                 message::add(__CLASS__, $this->getHumanName() . ' : ' . $_decision['reason'], '', $key);
                 cache::set('thermostatbe::safety::' . $this->getId(), 1);
             }
@@ -1212,6 +1433,7 @@ class thermostatbe extends eqLogic {
         if (cache::byKey('thermostatbe::safety::' . $this->getId())->getValue(0) == 1) {
             message::removeAll(__CLASS__, $key);
             cache::set('thermostatbe::safety::' . $this->getId(), 0);
+            $this->journal(__('Les sondes intérieures répondent de nouveau', __FILE__), 'info');
         }
     }
 
@@ -1439,6 +1661,9 @@ class thermostatbe extends eqLogic {
         cache::set($this->sentKey(), $sent);
         cache::set($this->rtKey('test'), $now + self::TEST_DURATION);
         log::add(__CLASS__, 'info', $this->getHumanName() . ' : ' . sprintf(__('essai %s %s', __FILE__), $_device, $_action));
+        $labels = array('on' => __('allumée', __FILE__), 'off' => __('arrêtée', __FILE__),
+                        'heat' => __('en chaud', __FILE__), 'cool' => __('en froid', __FILE__));
+        $this->journal(sprintf(__('Essai : %s %s', __FILE__), thermostatbeEngine::deviceName($_device), $labels[$_action]), 'user');
         return $now + self::TEST_DURATION;
     }
 
@@ -1461,6 +1686,24 @@ class thermostatbe extends eqLogic {
         cache::delete($this->sentKey());
         log::add(__CLASS__, 'info', $this->getHumanName() . ' : ' . thermostatbeEngine::deviceName($device)
             . ' ' . __('coupée', __FILE__) . ' (' . $_why . ')');
+    }
+
+    /* Le journal, les dates rendues lisibles : « 14:02 », « hier 23:10 »,
+     * « 21/09 06:30 ». */
+    public function journalForDisplay() {
+        $today = date('Y-m-d');
+        $yesterday = date('Y-m-d', strtotime('-1 day'));
+        return array_map(function ($_entry) use ($today, $yesterday) {
+            $day = date('Y-m-d', $_entry['at']);
+            if ($day == $today) {
+                $when = date('H:i', $_entry['at']);
+            } elseif ($day == $yesterday) {
+                $when = __('hier', __FILE__) . ' ' . date('H:i', $_entry['at']);
+            } else {
+                $when = date('d/m H:i', $_entry['at']);
+            }
+            return array('when' => $when, 'kind' => $_entry['kind'], 'text' => $_entry['text']);
+        }, $this->journalEntries());
     }
 
     /* Les réglages de marche tels que l'utilisateur les a choisis. */
@@ -1532,10 +1775,11 @@ class thermostatbe extends eqLogic {
     public function status() {
         $decision = cache::byKey($this->decisionKey())->getValue(null);
         if (!is_array($decision)) {
-            return array('runtime' => $this->runtime());
+            return array('runtime' => $this->runtime(), 'journal' => $this->journalForDisplay());
         }
         return array(
             'runtime'     => $this->runtime(),
+            'journal'     => $this->journalForDisplay(),
             'conditions'  => isset($decision['conditions']) ? $decision['conditions'] : array(),
             'at'          => date('H:i:s', $decision['at']),
             'target'      => thermostatbeEngine::targetLabel($decision['target']),
