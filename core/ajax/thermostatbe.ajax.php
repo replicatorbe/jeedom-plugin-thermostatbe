@@ -49,6 +49,21 @@ try {
         ajax::success($eqLogic->status());
     }
 
+    /* Un réglage de marche changé depuis la page : appliqué tout de suite,
+     * comme depuis le tableau de bord, et non à l'enregistrement du
+     * formulaire. Un formulaire ouvert depuis une heure renverrait sinon le
+     * mode d'il y a une heure, et effacerait celui qu'un scénario ou le
+     * tableau de bord a posé entre-temps. */
+    if (init('action') == 'setRuntime') {
+        $eqLogic = $getThermostat(init('id'));
+        $key = init('key');
+        if (!in_array($key, array('mode', 'source', 'heat_setpoint', 'cool_setpoint', 'preset'), true)) {
+            throw new Exception(__('Réglage inconnu :', __FILE__) . ' ' . $key);
+        }
+        $eqLogic->setRuntime($key, init('value'));
+        ajax::success(thermostatbe::byId($eqLogic->getId())->status());
+    }
+
     throw new Exception(__('Aucune méthode correspondante à :', __FILE__) . ' ' . init('action'));
 } catch (Exception $e) {
     ajax::error(displayException($e), $e->getCode());

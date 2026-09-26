@@ -42,7 +42,7 @@ Et des garde-fous qui retardent une décision sans jamais en inventer une :
 ### Onglet Thermostat
 
 - **Sondes intérieures** : une ou plusieurs. Le thermostat régule sur leur
-  moyenne. Une sonde silencieuse depuis plus de 90 minutes est écartée ; si
+  moyenne. Une sonde silencieuse depuis plus de 3 heures est écartée ; si
   aucune ne répond, tout est coupé et un message le signale.
 - **Sonde extérieure** : une station météo ou le plugin IRM. Sans elle, le
   thermostat reste en saison de chauffe et chauffe à la chaudière.
@@ -71,7 +71,17 @@ jamais relancée à l'aveugle, car elle bipe à chaque ordre.
 Tant que la clim n'est pas configurée, le thermostat chauffe à la chaudière et
 ne refroidit pas.
 
+**Corriger la télécommande** : coché, une clim dont l'état remonté contredit le
+thermostat reçoit à nouveau l'ordre (au plus toutes les 5 minutes) — c'est ce
+qui rattrape une commande perdue. Décoché, on peut l'allumer ou l'éteindre à la
+télécommande sans que le thermostat la remette dans son état.
+
 ### Onglet Réglages
+
+La partie **Marche** — mode, source, consignes, préréglage — s'applique
+**immédiatement**, sans passer par « Sauvegarder », comme depuis le tableau de
+bord. Un formulaire resté ouvert ne peut donc pas renvoyer, en l'enregistrant,
+un mode ou une consigne d'il y a une heure.
 
 | Réglage | Défaut | Rôle |
 |---|---|---|
@@ -82,6 +92,32 @@ ne refroidit pas.
 | Hystérésis | 0,3 °C (chaudière), 0,5 °C (clim) | |
 | Saison | chauffe < 15 °C, froid > 20 °C | Sur la moyenne extérieure |
 | Verrou chaud ↔ froid | 12 h | |
+
+### Onglet Conditions
+
+Une condition vraie change ce que fait le thermostat tant qu'elle reste vraie.
+L'expression s'écrit comme dans un scénario :
+
+| Exemple | Expression | Alors |
+|---|---|---|
+| Alarme armée | `#[Maison][Alarme][Actif]# == 1` | Ne pas chauffer |
+| Personne à la maison | `#[Maison][Présence][Personne]# == 0` | Consignes Absent |
+| Heures pleines | `#[Maison][Compteur][Tarif]# == "HP"` | Ne pas utiliser la clim |
+| Vacances | `#[Maison][Mode][Vacances]# == 1` | Hors-gel seulement |
+
+Effets possibles : *Tout arrêter*, *Hors-gel seulement*, *Consignes Éco*,
+*Consignes Absent*, *Ne pas chauffer*, *Ne pas refroidir*, *Ne pas utiliser la
+clim*, *Ne pas utiliser la chaudière*.
+
+- Le thermostat réagit dès qu'une commande citée change.
+- Plusieurs conditions vraies s'additionnent ; *Tout arrêter* l'emporte sur
+  *Hors-gel*, et entre Éco et Absent on garde la consigne la plus sobre.
+- Le **hors-gel reste assuré** avec tous les effets sauf *Tout arrêter*.
+- Les consignes affichées au tableau de bord restent les vôtres ; la raison
+  dit quelle condition s'applique.
+- Une expression que Jeedom ne sait pas calculer est **ignorée** (tenue pour
+  fausse) et le journal le signale : une faute de frappe ne coupe pas le
+  chauffage.
 
 ## Chaudière ou clim : le choix automatique
 

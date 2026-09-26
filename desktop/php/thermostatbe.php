@@ -113,6 +113,7 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 			<li role="presentation" class="active"><a href="#eqlogictab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-thermometer-half"></i><span class="hidden-xs"> {{Thermostat}}</span></a></li>
 			<li role="presentation"><a href="#devicetab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-fire"></i><span class="hidden-xs"> {{Appareils}}</span></a></li>
 			<li role="presentation"><a href="#settingstab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-sliders-h"></i><span class="hidden-xs"> {{Réglages}}</span></a></li>
+			<li role="presentation"><a href="#conditiontab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-user-shield"></i><span class="hidden-xs"> {{Conditions}}</span></a></li>
 			<li role="presentation"><a href="#commandtab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-list"></i><span class="hidden-xs"> {{Commandes}}</span></a></li>
 		</ul>
 
@@ -252,6 +253,13 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 							thermostatbeCmdField('ac_state', '{{État marche/arrêt}}', 'info', false,
 								'{{Facultatif. Si la clim ne suit pas l\'ordre, il est renvoyé, au plus toutes les 5 minutes.}}');
 							?>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Corriger la télécommande}}</label>
+								<div class="col-sm-7">
+									<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="ac_enforce" checked>
+									<span class="help-block" style="margin:0;">{{Coché : si l'état remonté contredit le thermostat, l'ordre est renvoyé — c'est ce qui rattrape une commande perdue. Décoché : quelqu'un peut allumer ou éteindre la clim à la télécommande sans que le thermostat la remette dans son état 5 minutes plus tard ; l'écart est seulement noté dans le journal.}}</span>
+								</div>
+							</div>
 						</fieldset>
 					</form>
 				</div>
@@ -262,12 +270,24 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 				<br>
 				<div class="col-lg-6">
 					<form class="form-horizontal">
+						<!--
+						     La marche ne fait pas partie du formulaire : chaque changement
+						     s'applique tout de suite, comme depuis le tableau de bord. Un
+						     formulaire resté ouvert renverrait sinon, à l'enregistrement,
+						     le mode et les consignes du moment où on l'a ouvert — et
+						     effacerait ce qu'un scénario a posé entre-temps.
+						-->
 						<fieldset>
-							<legend><i class="fas fa-power-off"></i> {{Marche}}</legend>
+							<legend><i class="fas fa-power-off"></i> {{Marche}} <small class="text-muted">{{appliqué immédiatement}}</small></legend>
+							<div class="form-group tbRuntimeNew">
+								<div class="col-sm-11 col-sm-offset-1">
+									<span class="help-block text-warning" style="margin:0;">{{Enregistrez d'abord le thermostat pour régler sa marche.}}</span>
+								</div>
+							</div>
 							<div class="form-group">
 								<label class="col-sm-5 control-label">{{Mode}}</label>
 								<div class="col-sm-4">
-									<select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="mode">
+									<select class="form-control tbRuntime" data-key="mode">
 										<option value="auto">{{Auto (saison selon l'extérieur)}}</option>
 										<option value="heat">{{Chauffage seulement}}</option>
 										<option value="cool">{{Refroidissement seulement}}</option>
@@ -279,10 +299,39 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 							<div class="form-group">
 								<label class="col-sm-5 control-label">{{Chauffer avec}}</label>
 								<div class="col-sm-4">
-									<select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="source">
+									<select class="form-control tbRuntime" data-key="source">
 										<option value="auto">{{Auto (le moins cher)}}</option>
 										<option value="boiler">{{La chaudière}}</option>
 										<option value="ac">{{La clim}}</option>
+									</select>
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-5 control-label">{{Chauffer jusqu'à}}</label>
+								<div class="col-sm-4">
+									<div class="input-group">
+										<input type="text" class="form-control roundedLeft tbRuntime" data-key="heat_setpoint" placeholder="20">
+										<span class="input-group-addon roundedRight">°C</span>
+									</div>
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-5 control-label">{{Refroidir à partir de}}</label>
+								<div class="col-sm-4">
+									<div class="input-group">
+										<input type="text" class="form-control roundedLeft tbRuntime" data-key="cool_setpoint" placeholder="25">
+										<span class="input-group-addon roundedRight">°C</span>
+									</div>
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-5 control-label">{{Préréglage}}</label>
+								<div class="col-sm-4">
+									<select class="form-control tbRuntime" data-key="preset">
+										<option value="manual" disabled>{{Manuel}}</option>
+										<option value="comfort">{{Confort}}</option>
+										<option value="eco">{{Éco}}</option>
+										<option value="away">{{Absent}}</option>
 									</select>
 								</div>
 							</div>
@@ -290,8 +339,6 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 						<fieldset>
 							<legend><i class="fas fa-thermometer-three-quarters"></i> {{Consignes}}</legend>
 							<?php
-							thermostatbeNumber('heat_setpoint', '{{Chauffer jusqu\'à}}', '°C', '20');
-							thermostatbeNumber('cool_setpoint', '{{Refroidir à partir de}}', '°C', '25');
 							thermostatbeNumber('frost_setpoint', '{{Hors-gel}}', '°C', '7',
 								'{{Tenue dans tous les modes sauf Arrêt, même en saison de froid.}}');
 							thermostatbeNumber('min_gap', '{{Écart minimum entre les deux}}', '°C', '2',
@@ -377,6 +424,52 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 						</fieldset>
 					</form>
 				</div>
+			</div>
+
+			<!-- ========================================== CONDITIONS ========================================== -->
+			<div role="tabpanel" class="tab-pane" id="conditiontab">
+				<br>
+				<div class="alert alert-info" style="margin:5px 5px 10px 5px;">
+					{{Une condition vraie change ce que fait le thermostat, le temps qu'elle reste vraie : « ne rien chauffer quand l'alarme est armée », « consignes Absent quand personne n'est à la maison », « jamais la clim en heures pleines ». L'expression s'écrit comme dans un scénario, par exemple}}
+					<code>#[Maison][Alarme][Actif]# == 1</code>.
+					{{Le thermostat réagit dès que la commande change. Le hors-gel reste toujours assuré, sauf avec « Tout arrêter ». Une expression que Jeedom ne sait pas calculer est ignorée, et le journal le signale.}}
+				</div>
+				<a class="btn btn-default btn-sm" id="bt_thermostatbeAddCondition" style="margin:0 0 10px 5px;"><i class="fas fa-plus-circle"></i> {{Ajouter une condition}}</a>
+				<table class="table table-bordered table-condensed" id="table_thermostatbeConditions">
+					<thead>
+						<tr>
+							<th style="width:70px;">{{Active}}</th>
+							<th style="width:22%;">{{Nom}}</th>
+							<th>{{Si cette expression est vraie}}</th>
+							<th style="width:24%;">{{Alors}}</th>
+							<th style="width:40px;"></th>
+						</tr>
+					</thead>
+					<tbody></tbody>
+				</table>
+				<!-- Le modèle d'une ligne : copié par le JS, jamais envoyé tel quel. -->
+				<template id="tpl_thermostatbeCondition">
+					<tr class="tbCondition">
+						<td><input type="checkbox" class="tbCondAttr" data-key="enable" checked></td>
+						<td><input type="text" class="form-control input-sm tbCondAttr" data-key="name" placeholder="{{Alarme armée}}"></td>
+						<td>
+							<div class="input-group">
+								<input type="text" class="form-control input-sm roundedLeft tbCondAttr" data-key="expression" placeholder="#[Maison][Alarme][Actif]# == 1">
+								<span class="input-group-btn">
+									<a class="btn btn-default btn-sm roundedRight tbCondPick" title="{{Insérer une commande}}"><i class="fas fa-list-alt"></i></a>
+								</span>
+							</div>
+						</td>
+						<td>
+							<select class="form-control input-sm tbCondAttr" data-key="effect">
+								<?php foreach (thermostatbe::EFFECTS as $effect) { ?>
+									<option value="<?php echo $effect; ?>"><?php echo thermostatbe::effectLabel($effect); ?></option>
+								<?php } ?>
+							</select>
+						</td>
+						<td><a class="btn btn-danger btn-sm tbCondRemove" title="{{Supprimer}}"><i class="fas fa-minus-circle"></i></a></td>
+					</tr>
+				</template>
 			</div>
 
 			<!-- ========================================== COMMANDES ========================================== -->

@@ -44,13 +44,25 @@ class thermostatbe extends eqLogic {
     );
 
     /*
+     * Ce qu'une condition de l'utilisateur peut faire au thermostat, dans
+     * l'ordre de la liste déroulante. Les deux premiers changent le mode, les
+     * deux suivants les consignes, les autres posent un interdit que le
+     * moteur respecte. Le hors-gel, lui, passe toujours.
+     */
+    const EFFECTS = array('off', 'frost', 'eco', 'away', 'no_heat', 'no_cool', 'no_ac', 'no_boiler');
+
+    /*
      * L'âge au-delà duquel une sonde intérieure est tenue pour muette, en
      * minutes. Une sonde à la pile vide ne se tait pas : Jeedom garde sa
      * dernière valeur indéfiniment, et le thermostat chaufferait tout l'hiver
-     * sur une mesure de novembre. 90 minutes laissent passer les sondes Zigbee
-     * qui ne publient qu'au changement.
+     * sur une mesure de novembre.
+     *
+     * Trois heures et non moins : beaucoup de sondes ne publient qu'au
+     * changement, et une nuit calme peut les laisser muettes plus d'une heure.
+     * Trop court, le délai couperait le chauffage à 4 h du matin sur une sonde
+     * en parfait état.
      */
-    const DEFAULT_SENSOR_MAX_AGE = 90;
+    const DEFAULT_SENSOR_MAX_AGE = 180;
 
     /*
      * Tous les combien la chaudière reçoit à nouveau son ordre, en minutes.
@@ -110,6 +122,9 @@ class thermostatbe extends eqLogic {
     /* ===================================================== CYCLE DE VIE eqLogic */
 
     public function preSave() {
+        if ($this->getConfiguration('ac_enforce', '') === '') {
+            $this->setConfiguration('ac_enforce', 1);
+        }
         /* Les réglages passent par le moteur, qui leur impose défauts et
          * bornes : une consigne tapée « 20,5 » vaut 20.5, et l'écart entre les
          * deux consignes est tenu dès l'enregistrement. */
@@ -131,6 +146,7 @@ class thermostatbe extends eqLogic {
         if ($this->getConfiguration('preset', '') == '') {
             $this->setConfiguration('preset', 'manual');
         }
+        $this->setConfiguration('conditions', self::cleanConditions($this->getConfiguration('conditions', array())));
         if ($this->getDisplay('width') == '') {
             $this->setDisplay('width', '300px');
         }
@@ -162,13 +178,19 @@ class thermostatbe extends eqLogic {
         cache::delete($this->stateKey());
         cache::delete($this->decisionKey());
         cache::delete($this->sentKey());
+        cache::delete($this->stateKey() . '::saved');
+        config::remove($this->stateKey(), __CLASS__);
+        message::removeAll(__CLASS__, 'safety' . $this->getId());
     }
 
     /* L'écouteur suit la liste des sondes et des fenêtres : reconstruit à
      * chaque enregistrement, il ne garde pas une sonde retirée. */
     private function updateListener() {
         $listener = listener::byClassAndFunction(__CLASS__, 'pull', array('eqLogic_id' => intval($this->getId())));
-        $ids = array_merge($this->cmdIds('indoor_sensors'), $this->cmdIds('windows'));
+        /* Les commandes citées par les conditions aussi : armer l'alarme doit
+         * couper le chauffage tout de suite, pas à la minute suivante. */
+        $ids = array_values(array_unique(array_merge($this->cmdIds('indoor_sensors'), $this->cmdIds('windows'),
+                                                     $this->conditionCmdIds())));
         if ($this->getIsEnable() != 1 || count($ids) == 0) {
             if (is_object($listener)) {
                 $listener->remove();
@@ -361,12 +383,7 @@ class thermostatbe extends eqLogic {
                 if (!isset(self::PRESETS[$_value])) {
                     throw new Exception(__('Préréglage inconnu :', __FILE__) . ' ' . $_value);
                 }
-                $heat = thermostatbeEngine::number($this->getConfiguration('preset_' . $_value . '_heat', ''));
-                $cool = thermostatbeEngine::number($this->getConfiguration('preset_' . $_value . '_cool', ''));
-                $pair = thermostatbeEngine::fitSetpoints(
-                    ($heat === null) ? self::PRESETS[$_value]['heat'] : $heat,
-                    ($cool === null) ? self::PRESETS[$_value]['cool'] : $cool,
-                    $settings['min_gap']);
+                $pair = $this->presetValues($_value);
                 $this->setConfiguration('heat_setpoint', $pair[0]);
                 $this->setConfiguration('cool_setpoint', $pair[1]);
                 $this->setConfiguration('preset', $_value);
@@ -392,6 +409,159 @@ class thermostatbe extends eqLogic {
         $raw['has_ac_heat'] = $acBase && $this->cmdId('ac_mode_heat') !== null;
         $raw['has_ac_cool'] = $acBase && $this->cmdId('ac_mode_cool') !== null;
         return thermostatbeEngine::cleanSettings($raw);
+    }
+
+    /* ============================================================ CONDITIONS */
+
+    /*
+     * Impose leur forme aux conditions : une expression, un effet connu, un
+     * nom. Une ligne sans expression est une ligne vide, retirée.
+     */
+    public static function cleanConditions($_conditions) {
+        $clean = array();
+        if (!is_array($_conditions)) {
+            return $clean;
+        }
+        foreach ($_conditions as $condition) {
+            if (!is_array($condition)) {
+                continue;
+            }
+            $expression = isset($condition['expression']) ? trim((string) $condition['expression']) : '';
+            if ($expression === '') {
+                continue;
+            }
+            $effect = isset($condition['effect']) ? $condition['effect'] : '';
+            $clean[] = array(
+                'enable'     => (isset($condition['enable']) && $condition['enable'] == 0) ? 0 : 1,
+                'name'       => isset($condition['name']) ? trim((string) $condition['name']) : '',
+                'expression' => $expression,
+                'effect'     => in_array($effect, self::EFFECTS, true) ? $effect : 'off',
+            );
+        }
+        return $clean;
+    }
+
+    public function conditionCmdIds() {
+        $ids = array();
+        foreach (self::cleanConditions($this->getConfiguration('conditions', array())) as $condition) {
+            if ($condition['enable'] != 1) {
+                continue;
+            }
+            preg_match_all('/#(\d+)#/', $condition['expression'], $matches);
+            foreach ($matches[1] as $id) {
+                $ids[] = (int) $id;
+            }
+        }
+        return array_values(array_unique($ids));
+    }
+
+    public static function effectLabel($_effect) {
+        switch ($_effect) {
+            case 'off':       return __('Tout arrêter', __FILE__);
+            case 'frost':     return __('Hors-gel seulement', __FILE__);
+            case 'eco':       return __('Consignes Éco', __FILE__);
+            case 'away':      return __('Consignes Absent', __FILE__);
+            case 'no_heat':   return __('Ne pas chauffer', __FILE__);
+            case 'no_cool':   return __('Ne pas refroidir', __FILE__);
+            case 'no_ac':     return __('Ne pas utiliser la clim', __FILE__);
+            case 'no_boiler': return __('Ne pas utiliser la chaudière', __FILE__);
+        }
+        return $_effect;
+    }
+
+    /*
+     * Évalue une condition.
+     *
+     * Seuls un booléen et un nombre font foi. Une expression que le coeur ne
+     * sait pas calculer lui revient sous forme de texte — les valeurs des
+     * commandes déjà substituées, « 24.9 >>> faux » — et ce texte non vide
+     * passerait pour « vrai » : une faute de frappe couperait le chauffage.
+     * Tout ce qui n'est ni booléen ni nombre est donc tenu pour faux, et le
+     * journal le dit. Une commande texte se compare : « #[…][Tarif]# == "HP" ».
+     */
+    private function conditionIsTrue($_condition) {
+        try {
+            $result = jeedom::evaluateExpression($_condition['expression']);
+        } catch (Throwable $e) {
+            $result = null;
+        }
+        if (is_bool($result)) {
+            return $result;
+        }
+        if (is_numeric($result)) {
+            return ((float) $result) != 0;
+        }
+        log::add(__CLASS__, 'warning', $this->getHumanName() . ' : '
+            . __('condition impossible à évaluer, ignorée :', __FILE__) . ' '
+            . jeedom::toHumanReadable($_condition['expression']));
+        return false;
+    }
+
+    /*
+     * Les conditions vraies en ce moment, avec leur nom lisible. Les
+     * évaluations sont faites une fois par passage : settings() et
+     * l'affichage lisent le même résultat.
+     */
+    public function activeConditions() {
+        $active = array();
+        foreach (self::cleanConditions($this->getConfiguration('conditions', array())) as $condition) {
+            if ($condition['enable'] != 1 || !$this->conditionIsTrue($condition)) {
+                continue;
+            }
+            if ($condition['name'] === '') {
+                $condition['name'] = jeedom::toHumanReadable($condition['expression']);
+            }
+            $active[] = $condition;
+        }
+        return $active;
+    }
+
+    /*
+     * Applique les conditions vraies aux réglages. L'arrêt l'emporte sur le
+     * hors-gel, le hors-gel sur les consignes ; entre Éco et Absent, on prend
+     * pour chaque côté la consigne la plus sobre. Les interdits s'ajoutent.
+     */
+    public function applyConditions($_settings, $_active) {
+        $settings = $_settings;
+        $names = array();
+        foreach ($_active as $condition) {
+            $names[$condition['effect']][] = $condition['name'];
+        }
+        $label = function ($_effect) use ($names) {
+            return implode(', ', $names[$_effect]);
+        };
+        if (isset($names['off'])) {
+            $settings['mode'] = thermostatbeEngine::MODE_OFF;
+            $settings['mode_reason'] = sprintf(__('Thermostat coupé par la condition « %s »', __FILE__), $label('off'));
+        } elseif (isset($names['frost']) && $settings['mode'] != thermostatbeEngine::MODE_OFF) {
+            $settings['mode'] = thermostatbeEngine::MODE_FROST;
+            $settings['mode_reason'] = sprintf(__('Hors-gel imposé par la condition « %s »', __FILE__), $label('frost'));
+        }
+        foreach (array('eco', 'away') as $preset) {
+            if (!isset($names[$preset])) {
+                continue;
+            }
+            $values = $this->presetValues($preset);
+            $settings['heat_setpoint'] = min($settings['heat_setpoint'], $values[0]);
+            $settings['cool_setpoint'] = max($settings['cool_setpoint'], $values[1]);
+        }
+        foreach (thermostatbeEngine::RESTRICTIONS as $key) {
+            if (isset($names[$key])) {
+                $settings[$key] = sprintf(__('condition « %s »', __FILE__), $label($key));
+            }
+        }
+        return thermostatbeEngine::cleanSettings($settings);
+    }
+
+    /* Les consignes d'un préréglage, écart minimum tenu. */
+    public function presetValues($_preset) {
+        $heat = thermostatbeEngine::number($this->getConfiguration('preset_' . $_preset . '_heat', ''));
+        $cool = thermostatbeEngine::number($this->getConfiguration('preset_' . $_preset . '_cool', ''));
+        $gap = thermostatbeEngine::number($this->getConfiguration('min_gap', ''));
+        return thermostatbeEngine::fitSetpoints(
+            ($heat === null) ? self::PRESETS[$_preset]['heat'] : $heat,
+            ($cool === null) ? self::PRESETS[$_preset]['cool'] : $cool,
+            ($gap === null) ? thermostatbeEngine::DEFAULTS['min_gap'] : $gap);
     }
 
     /*
@@ -554,11 +724,16 @@ class thermostatbe extends eqLogic {
      * chaque changement d'état. Un cache vidé ferait oublier quand on a
      * chauffé pour la dernière fois, et avec lui le verrou qui empêche de
      * refroidir juste après.
+     *
+     * En base, dans la configuration du plugin et non dans celle de
+     * l'équipement : le cron travaille sur un équipement chargé au début de
+     * son passage, et l'enregistrer effacerait un réglage que l'utilisateur
+     * aurait sauvegardé depuis la page pendant ce temps.
      */
     private function loadState() {
         $state = cache::byKey($this->stateKey())->getValue(null);
         if (!is_array($state)) {
-            $state = $this->getConfiguration('engine_state', array());
+            $state = json_decode((string) config::byKey($this->stateKey(), __CLASS__, ''), true);
         }
         return is_array($state) ? $state : array();
     }
@@ -566,8 +741,7 @@ class thermostatbe extends eqLogic {
     private function storeState($_state, $_persist) {
         cache::set($this->stateKey(), $_state);
         if ($_persist) {
-            $this->setConfiguration('engine_state', $_state);
-            $this->save(true);
+            config::save($this->stateKey(), json_encode($_state), __CLASS__);
         }
     }
 
@@ -584,9 +758,16 @@ class thermostatbe extends eqLogic {
         if ($this->getIsEnable() != 1) {
             return null;
         }
-        $lock = fopen(jeedom::getTmpFolder(__CLASS__) . '/eq' . $this->getId() . '.lock', 'c');
+        /* Sans verrou, on évalue quand même : un fichier de verrou illisible
+         * ne doit pas arrêter le thermostat en silence, la maison avec. */
+        $lock = @fopen(jeedom::getTmpFolder(__CLASS__) . '/eq' . $this->getId() . '.lock', 'c');
         if ($lock === false || !flock($lock, LOCK_EX)) {
-            return null;
+            log::add(__CLASS__, 'warning', $this->getHumanName() . ' : '
+                . __('verrou indisponible, évaluation sans verrou', __FILE__));
+            if ($lock !== false) {
+                fclose($lock);
+            }
+            return $this->evaluateLocked($_origin);
         }
         try {
             return $this->evaluateLocked($_origin);
@@ -597,7 +778,8 @@ class thermostatbe extends eqLogic {
     }
 
     private function evaluateLocked($_origin) {
-        $settings = $this->settings();
+        $active = $this->activeConditions();
+        $settings = $this->applyConditions($this->settings(), $active);
         $indoor = $this->indoor();
         $outdoor = $this->outdoor();
         $state = $this->loadState();
@@ -608,12 +790,38 @@ class thermostatbe extends eqLogic {
             'now'             => time(),
             'indoor'          => $indoor['value'],
             'outdoor'         => $outdoor,
-            'outdoor_seed'    => ($previous['outdoor_avg'] === null) ? $this->outdoorSeed() : null,
+            /* L'historique n'est relu que si la moyenne manque ou s'est
+             * interrompue : pas à chaque passage. */
+            'outdoor_seed'    => ($previous['outdoor_avg'] === null
+                                  || time() - (int) $previous['outdoor_avg_at'] > thermostatbeEngine::OUTDOOR_GAP)
+                                 ? $this->outdoorSeed() : null,
             'window_open_for' => $windowFor,
         );
         $decision = thermostatbeEngine::decide($settings, $inputs, $state);
+        /* Une condition qui change les consignes ne se voit pas dans la raison
+         * du moteur : « 19 °C pour 16 °C » sans dire pourquoi 16. */
+        $stopped = in_array($settings['mode'], array(thermostatbeEngine::MODE_OFF, thermostatbeEngine::MODE_FROST), true);
+        foreach ($active as $condition) {
+            if (!$stopped && in_array($condition['effect'], array('eco', 'away'), true)) {
+                $decision['reason'] = sprintf(__('%s (condition « %s »)', __FILE__),
+                    $decision['reason'], $condition['name']);
+            }
+        }
         $changed = ($decision['target'] != $previous['target']);
-        $this->storeState($decision['state'], $changed);
+        /* En base à chaque changement d'état, et au moins toutes les heures :
+         * la moyenne extérieure survit ainsi à un redémarrage. */
+        $persistedAt = (int) cache::byKey($this->stateKey() . '::saved')->getValue(0);
+        $persist = $changed || time() - $persistedAt >= 3600;
+        $this->storeState($decision['state'], $persist);
+        if ($persist) {
+            cache::set($this->stateKey() . '::saved', time());
+        }
+        if (count($this->cmdIds('indoor_sensors')) == 0) {
+            /* Rien de perdu : rien n'a encore été choisi. Le dire autrement
+             * qu'une panne, et sans alerte dans le centre de messages. */
+            $decision['status'] = 'blocked';
+            $decision['reason'] = __('Choisissez au moins une sonde intérieure (onglet Thermostat)', __FILE__);
+        }
 
         if ($changed) {
             log::add(__CLASS__, 'info', $this->getHumanName() . ' : '
@@ -629,6 +837,9 @@ class thermostatbe extends eqLogic {
         $decision['inputs'] = $inputs;
         $decision['sensors'] = $indoor['sensors'];
         $decision['settings'] = $settings;
+        $decision['conditions'] = array_map(function ($_condition) {
+            return array('name' => $_condition['name'], 'effect' => self::effectLabel($_condition['effect']));
+        }, $active);
         $decision['at'] = time();
         cache::set($this->decisionKey(), $decision);
         $this->refreshInfo($decision, $settings, $indoor['value'], $outdoor, $windowFor);
@@ -646,9 +857,14 @@ class thermostatbe extends eqLogic {
         if ($_decision['outdoor_avg'] !== null) {
             $this->checkAndUpdateCmd('outdoor_avg', round($_decision['outdoor_avg'], 1));
         }
-        $this->checkAndUpdateCmd('heat_setpoint', $_settings['heat_setpoint']);
-        $this->checkAndUpdateCmd('cool_setpoint', $_settings['cool_setpoint']);
-        $this->checkAndUpdateCmd('mode', $_settings['mode']);
+        /* Les consignes et le mode affichés sont ceux de l'utilisateur, pas
+         * ceux qu'une condition impose pour un temps : le curseur du tableau
+         * de bord ne doit pas sauter à 16 °C quand l'alarme s'arme, ni y
+         * rester quand elle se désarme. La raison dit ce qui s'applique. */
+        $runtime = $this->runtime();
+        $this->checkAndUpdateCmd('heat_setpoint', $runtime['heat_setpoint']);
+        $this->checkAndUpdateCmd('cool_setpoint', $runtime['cool_setpoint']);
+        $this->checkAndUpdateCmd('mode', $runtime['mode']);
         $this->checkAndUpdateCmd('source', $_settings['source']);
         $this->checkAndUpdateCmd('preset', $this->getConfiguration('preset', 'manual'));
         $this->checkAndUpdateCmd('state', thermostatbeEngine::targetLabel($target));
@@ -810,6 +1026,14 @@ class thermostatbe extends eqLogic {
         }
         $state = self::readSensor($stateId);
         if ($state['value'] !== null && ((int) $state['value'] == 1) != $_on) {
+            /* Un ordre perdu, ou quelqu'un qui a pris la télécommande : on ne
+             * peut pas les distinguer. Le choix revient à l'utilisateur. */
+            if ($this->getConfiguration('ac_enforce', 1) != 1) {
+                log::add(__CLASS__, 'info', $this->getHumanName() . ' : '
+                    . __('la clim ne suit pas l\'ordre (télécommande ?), laissée telle quelle', __FILE__));
+                $_sent['ac_at'] = $_now;
+                return;
+            }
             log::add(__CLASS__, 'warning', $this->getHumanName() . ' : '
                 . __('la clim ne suit pas l\'ordre, renvoi', __FILE__));
             $this->sendAc($_on, $_mode, $_setpoint, $_sent, $_now);
@@ -865,19 +1089,33 @@ class thermostatbe extends eqLogic {
         }
         $state['target'] = thermostatbeEngine::IDLE;
         $state[$device . '_off_at'] = time();
-        cache::set($this->stateKey(), $state);
+        $this->storeState($state, true);
         cache::delete($this->sentKey());
         log::add(__CLASS__, 'info', $this->getHumanName() . ' : ' . thermostatbeEngine::deviceName($device)
             . ' ' . __('coupée', __FILE__) . ' (' . $_why . ')');
+    }
+
+    /* Les réglages de marche tels que l'utilisateur les a choisis. */
+    public function runtime() {
+        $settings = $this->settings();
+        return array(
+            'mode'          => $settings['mode'],
+            'source'        => $settings['source'],
+            'heat_setpoint' => $settings['heat_setpoint'],
+            'cool_setpoint' => $settings['cool_setpoint'],
+            'preset'        => $this->getConfiguration('preset', 'manual'),
+        );
     }
 
     /* La dernière décision, pour la page de l'équipement. */
     public function status() {
         $decision = cache::byKey($this->decisionKey())->getValue(null);
         if (!is_array($decision)) {
-            return null;
+            return array('runtime' => $this->runtime());
         }
         return array(
+            'runtime'     => $this->runtime(),
+            'conditions'  => isset($decision['conditions']) ? $decision['conditions'] : array(),
             'at'          => date('H:i:s', $decision['at']),
             'target'      => thermostatbeEngine::targetLabel($decision['target']),
             'status'      => $decision['status'],

@@ -55,7 +55,10 @@ function thermostatbeShowStatus(_status) {
   var root = document.getElementById('div_thermostatbeStatus')
   if (!root) { return }
   root.innerHTML = ''
-  if (!_status) {
+  if (_status && _status.runtime) {
+    thermostatbeFillRuntime(_status.runtime)
+  }
+  if (!_status || !_status.target) {
     root.appendChild(thermostatbeText('span', '{{Pas encore de décision : enregistrez le thermostat, ou cliquez sur « Évaluer maintenant ».}}'))
     return
   }
@@ -70,6 +73,18 @@ function thermostatbeShowStatus(_status) {
   var reason = thermostatbeText('p', _status.reason)
   reason.style.margin = '8px 0'
   root.appendChild(reason)
+
+  if (_status.conditions && _status.conditions.length > 0) {
+    var active = document.createElement('div')
+    active.className = 'alert alert-warning'
+    active.style.padding = '6px 10px'
+    active.style.margin = '0 0 8px 0'
+    active.appendChild(thermostatbeText('b', '{{Conditions actives}} : '))
+    active.appendChild(thermostatbeText('span', _status.conditions.map(function (condition) {
+      return condition.name + ' → ' + condition.effect
+    }).join(' · ')))
+    root.appendChild(active)
+  }
 
   var rows = [
     ['{{Intérieur}}', _status.indoor],
@@ -116,40 +131,147 @@ function thermostatbeShowStatus(_status) {
   }
 }
 
+/* ============================================================== MARCHE */
+
+/* Vrai pendant qu'on repose des valeurs à l'écran : une valeur posée par le
+   script émet « change » comme une saisie, et renverrait au serveur ce qu'il
+   vient de nous dire. */
+var thermostatbeRendering = false
+
+function thermostatbeFillRuntime(_runtime) {
+  thermostatbeRendering = true
+  try {
+    document.querySelectorAll('.tbRuntime').forEach(function (field) {
+      var key = field.getAttribute('data-key')
+      if (!isset(_runtime[key])) { return }
+      var value = _runtime[key]
+      if (key == 'heat_setpoint' || key == 'cool_setpoint') {
+        value = String(value).replace('.', ',')
+      }
+      field.value = value
+    })
+  } finally {
+    thermostatbeRendering = false
+  }
+}
+
+/* Les champs de marche n'ont de sens que pour un thermostat enregistré : ils
+   parlent au serveur par son identifiant. */
+function thermostatbeEnableRuntime(_enabled) {
+  document.querySelectorAll('.tbRuntime').forEach(function (field) {
+    field.disabled = !_enabled
+  })
+  document.querySelectorAll('.tbRuntimeNew').forEach(function (block) {
+    block.style.display = _enabled ? 'none' : ''
+  })
+}
+
+function thermostatbeSetRuntime(_field) {
+  var id = thermostatbeCurrentId()
+  if (id === null) { return }
+  thermostatbeRequest({ action: 'setRuntime', id: id, key: _field.getAttribute('data-key'), value: _field.value },
+    function (result) {
+      thermostatbeShowStatus(result)
+      jeedomUtils.showAlert({ message: '{{Appliqué}}', level: 'success', timeOut: 1500 })
+    },
+    function () {
+      /* Refusé : on remet à l'écran ce qui s'applique vraiment. */
+      thermostatbeLoadStatus(false)
+    })
+}
+
+function thermostatbeRequest(_data, _success, _failure) {
+  var id = _data.id
+  domUtils.ajax({
+    type: 'POST',
+    url: 'plugins/thermostatbe/core/ajax/thermostatbe.ajax.php',
+    data: _data,
+    dataType: 'json',
+    noDisplayError: true,
+    error: function (request, status, error) {
+      domUtils.handleAjaxError(request, status, error)
+      if (_failure) { _failure() }
+    },
+    success: function (data) {
+      if (data.state != 'ok') {
+        jeedomUtils.showAlert({ message: data.result, level: 'danger' })
+        if (_failure) { _failure() }
+        return
+      }
+      /* La page a pu changer de thermostat pendant l'aller-retour. */
+      if (thermostatbeCurrentId() !== id) { return }
+      _success(data.result)
+    }
+  })
+}
+
 function thermostatbeLoadStatus(_refresh) {
   var id = thermostatbeCurrentId()
   if (id === null) {
     thermostatbeShowStatus(null)
     return
   }
-  domUtils.ajax({
-    type: 'POST',
-    url: 'plugins/thermostatbe/core/ajax/thermostatbe.ajax.php',
-    data: { action: 'status', id: id, refresh: _refresh ? 1 : 0 },
-    dataType: 'json',
-    noDisplayError: true,
-    error: function (request, status, error) {
-      domUtils.handleAjaxError(request, status, error)
-    },
-    success: function (data) {
-      if (data.state != 'ok') {
-        jeedomUtils.showAlert({ message: data.result, level: 'danger' })
-        return
-      }
-      /* La page a pu changer de thermostat pendant l'aller-retour. */
-      if (thermostatbeCurrentId() !== id) { return }
-      thermostatbeShowStatus(data.result)
+  thermostatbeRequest({ action: 'status', id: id, refresh: _refresh ? 1 : 0 }, function (result) {
+    thermostatbeShowStatus(result)
+  })
+}
+
+/* ============================================================ CONDITIONS */
+
+function thermostatbeAddCondition(_condition) {
+  var template = document.getElementById('tpl_thermostatbeCondition')
+  var body = document.querySelector('#table_thermostatbeConditions tbody')
+  if (!template || !body) { return }
+  var row = template.content.firstElementChild.cloneNode(true)
+  var condition = _condition || {}
+  row.querySelectorAll('.tbCondAttr').forEach(function (field) {
+    var key = field.getAttribute('data-key')
+    if (field.type == 'checkbox') {
+      field.checked = !isset(condition.enable) || condition.enable == 1
+    } else if (isset(condition[key])) {
+      field.value = condition[key]
     }
   })
+  body.appendChild(row)
+}
+
+function thermostatbeReadConditions() {
+  var conditions = []
+  document.querySelectorAll('#table_thermostatbeConditions .tbCondition').forEach(function (row) {
+    var condition = {}
+    row.querySelectorAll('.tbCondAttr').forEach(function (field) {
+      condition[field.getAttribute('data-key')] = (field.type == 'checkbox') ? (field.checked ? 1 : 0) : field.value
+    })
+    if (condition.expression && condition.expression.trim() !== '') {
+      conditions.push(condition)
+    }
+  })
+  return conditions
 }
 
 /* ================================================== CYCLE DE VIE DE LA PAGE */
 
 function printEqLogic(_eqLogic) {
+  var configuration = (isset(_eqLogic) && isset(_eqLogic.configuration)) ? _eqLogic.configuration : {}
+  var body = document.querySelector('#table_thermostatbeConditions tbody')
+  if (body) { body.innerHTML = '' }
+  var conditions = Array.isArray(configuration.conditions) ? configuration.conditions : []
+  conditions.forEach(function (condition) { thermostatbeAddCondition(condition) })
+
   thermostatbeShowStatus(null)
-  if (isset(_eqLogic.id) && _eqLogic.id != '') {
+  var saved = isset(_eqLogic.id) && _eqLogic.id != ''
+  thermostatbeEnableRuntime(saved)
+  if (saved) {
     thermostatbeLoadStatus(false)
   }
+}
+
+/* Appelée par plugin.template.js avant l'enregistrement : les conditions sont
+   une liste, que data-lXkey ne sait pas ramasser. */
+function saveEqLogic(_eqLogic) {
+  if (!isset(_eqLogic.configuration)) { _eqLogic.configuration = {} }
+  _eqLogic.configuration.conditions = thermostatbeReadConditions()
+  return _eqLogic
 }
 
 /* ================================================================ COMMANDES */
@@ -245,5 +367,42 @@ thermostatbeContainer.addEventListener('click', function (event) {
   if (event.target.closest('#bt_thermostatbeRefresh')) {
     thermostatbeLoadStatus(true)
     return
+  }
+
+  if (event.target.closest('#bt_thermostatbeAddCondition')) {
+    thermostatbeAddCondition(null)
+    thermostatbeMarkModified()
+    return
+  }
+
+  if (target = event.target.closest('.tbCondRemove')) {
+    target.closest('.tbCondition').remove()
+    thermostatbeMarkModified()
+    return
+  }
+
+  /* Une commande insérée à la suite de l'expression : une condition en cite
+     souvent plusieurs, « #[…][Alarme]# == 1 && #[…][Présence]# == 0 ». */
+  if (target = event.target.closest('.tbCondPick')) {
+    var expression = target.closest('.tbCondition').querySelector('.tbCondAttr[data-key="expression"]')
+    jeedom.cmd.getSelectModal({ cmd: { type: 'info' } }, function (result) {
+      if (!result || !result.human) { return }
+      expression.value = (expression.value.trim() === '') ? result.human : expression.value.trim() + ' ' + result.human
+      thermostatbeMarkModified()
+    })
+    return
+  }
+})
+
+thermostatbeContainer.addEventListener('change', function (event) {
+  var field
+  if (field = event.target.closest('.tbRuntime')) {
+    if (!thermostatbeRendering) { thermostatbeSetRuntime(field) }
+    return
+  }
+  /* Les champs des conditions ne sont pas des .eqLogicAttr : le coeur ne les
+     voit pas changer, et quitterait la page sans prévenir. */
+  if (event.target.closest('.tbCondAttr')) {
+    thermostatbeMarkModified()
   }
 })

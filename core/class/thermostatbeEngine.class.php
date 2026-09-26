@@ -74,6 +74,9 @@ class thermostatbeEngine {
     const SEASON_HEAT = 'heat';
     const SEASON_COOL = 'cool';
 
+    /* Les interdits qu'une condition peut poser. */
+    const RESTRICTIONS = array('no_heat', 'no_cool', 'no_ac', 'no_boiler');
+
     /*
      * La constante de temps de la moyenne extérieure, en secondes.
      *
@@ -84,6 +87,10 @@ class thermostatbeEngine {
      * et une vraie vague de chaleur la fait basculer en un à deux jours.
      */
     const OUTDOOR_TAU = 43200;
+
+    /* Au-delà d'une heure sans mise à jour, la moyenne est tenue pour
+     * interrompue. */
+    const OUTDOOR_GAP = 3600;
 
     /* Les réglages par défaut, et leurs bornes. Tout ce qui arrive d'un
      * formulaire ou d'un scénario passe par cleanSettings(). */
@@ -222,6 +229,18 @@ class thermostatbeEngine {
         foreach (array('has_boiler', 'has_ac_heat', 'has_ac_cool') as $key) {
             $clean[$key] = !empty($settings[$key]);
         }
+
+        /*
+         * Les interdits posés par les conditions de l'utilisateur (« alarme
+         * armée », « personne à la maison »…). Chacun porte le texte à
+         * afficher comme raison ; vide, il n'est pas posé. Le plugin Jeedom
+         * les évalue, le moteur ne fait que les respecter.
+         */
+        foreach (self::RESTRICTIONS as $key) {
+            $clean[$key] = (isset($settings[$key]) && is_string($settings[$key])) ? trim($settings[$key]) : '';
+        }
+        $clean['mode_reason'] = (isset($settings['mode_reason']) && is_string($settings['mode_reason']))
+            ? trim($settings['mode_reason']) : '';
         return $clean;
     }
 
@@ -265,6 +284,7 @@ class thermostatbeEngine {
             'outdoor_avg'    => null,
             'outdoor_avg_at' => null,
             'heat_source'    => null,
+            'ac_setpoint'    => null,
         );
         foreach ($clean as $key => $default) {
             if (!isset($state[$key]) || $state[$key] === '') {
@@ -316,13 +336,20 @@ class thermostatbeEngine {
         if ($_outdoor === null) {
             return $state;
         }
-        if ($state['outdoor_avg'] === null) {
+        $elapsed = ($state['outdoor_avg'] === null) ? null : max(0, $_now - (int) $state['outdoor_avg_at']);
+        /* Moyenne absente, ou vieille de plus d'une heure (Jeedom arrêté,
+         * sonde muette) : la moyenne de l'historique, si on l'a, vaut mieux
+         * qu'une moyenne qui a manqué des heures de mesures. */
+        if ($elapsed === null || ($_seed !== null && $elapsed > self::OUTDOOR_GAP)) {
             $state['outdoor_avg'] = ($_seed !== null) ? (float) $_seed : (float) $_outdoor;
             $state['outdoor_avg_at'] = $_now;
             return $state;
         }
-        $elapsed = max(0, $_now - (int) $state['outdoor_avg_at']);
-        $alpha = min(1.0, $elapsed / self::OUTDOOR_TAU);
+        /* Sans historique, un trou compte pour une heure au plus : après une
+         * nuit sans mesure, la première valeur de l'après-midi ne doit pas
+         * remplacer à elle seule la moyenne de la veille, et faire basculer la
+         * saison au redémarrage de Jeedom. */
+        $alpha = min($elapsed, self::OUTDOOR_GAP) / self::OUTDOOR_TAU;
         $state['outdoor_avg'] = round($state['outdoor_avg'] + $alpha * ($_outdoor - $state['outdoor_avg']), 3);
         $state['outdoor_avg_at'] = $_now;
         return $state;
@@ -398,20 +425,38 @@ class thermostatbeEngine {
     public static function chooseSource($_settings, $_outdoor, $_previous) {
         $hasBoiler = $_settings['has_boiler'];
         $hasAc = $_settings['has_ac_heat'];
+        $noBoiler = $_settings['no_boiler'];
+        $noAc = $_settings['no_ac'];
 
         if ($_settings['source'] == self::SOURCE_BOILER) {
-            return $hasBoiler
-                ? array('source' => 'boiler', 'why' => 'chaudière imposée')
-                : array('source' => null, 'why' => 'chaudière imposée, mais aucune chaudière configurée');
+            if (!$hasBoiler) {
+                return array('source' => null, 'why' => 'chaudière imposée, mais aucune chaudière configurée');
+            }
+            return ($noBoiler !== '')
+                ? array('source' => null, 'why' => 'chaudière imposée, mais interdite (' . $noBoiler . ')')
+                : array('source' => 'boiler', 'why' => 'chaudière imposée');
         }
         if ($_settings['source'] == self::SOURCE_AC) {
-            return $hasAc
-                ? array('source' => 'ac', 'why' => 'clim imposée')
-                : array('source' => null, 'why' => 'clim imposée, mais aucune clim configurée pour chauffer');
+            if (!$hasAc) {
+                return array('source' => null, 'why' => 'clim imposée, mais aucune clim configurée pour chauffer');
+            }
+            return ($noAc !== '')
+                ? array('source' => null, 'why' => 'clim imposée, mais interdite (' . $noAc . ')')
+                : array('source' => 'ac', 'why' => 'clim imposée');
         }
 
+        /* En automatique, un appareil interdit est un appareil absent. */
+        if ($hasBoiler && $noBoiler !== '' && $hasAc && $noAc === '') {
+            return array('source' => 'ac', 'why' => 'chaudière interdite (' . $noBoiler . ')');
+        }
+        if ($hasAc && $noAc !== '' && $hasBoiler && $noBoiler === '') {
+            return array('source' => 'boiler', 'why' => 'clim interdite (' . $noAc . ')');
+        }
+        $hasBoiler = $hasBoiler && $noBoiler === '';
+        $hasAc = $hasAc && $noAc === '';
         if (!$hasBoiler && !$hasAc) {
-            return array('source' => null, 'why' => 'aucun appareil de chauffage configuré');
+            return array('source' => null, 'why' => ($noBoiler !== '' || $noAc !== '')
+                ? 'tous les appareils de chauffage sont interdits' : 'aucun appareil de chauffage configuré');
         }
         if (!$hasAc) {
             return array('source' => 'boiler', 'why' => 'seule la chaudière est configurée');
@@ -551,10 +596,19 @@ class thermostatbeEngine {
             $result['status'] = 'cooling';
         }
         if (self::device($final) == 'ac') {
-            $sp = ($need['setpoint'] !== null) ? $need['setpoint'] : $settings['heat_setpoint'];
-            $offset = ($final == self::HEAT_AC) ? $settings['ac_heat_offset'] : $settings['ac_cool_offset'];
-            $result['ac_setpoint'] = self::acSetpoint($settings, $sp + $offset);
+            if ($final != $wanted && $state['ac_setpoint'] !== null) {
+                /* La clim est maintenue par un garde-fou alors que le besoin a
+                 * changé — la saison vient de basculer, par exemple. Lui
+                 * envoyer la consigne du nouveau besoin la ferait chauffer à
+                 * 26 °C pendant ses dernières minutes : elle garde la sienne. */
+                $result['ac_setpoint'] = (float) $state['ac_setpoint'];
+            } else {
+                $sp = ($need['setpoint'] !== null) ? $need['setpoint'] : $settings['heat_setpoint'];
+                $offset = ($final == self::HEAT_AC) ? $settings['ac_heat_offset'] : $settings['ac_cool_offset'];
+                $result['ac_setpoint'] = self::acSetpoint($settings, $sp + $offset);
+            }
         }
+        $state['ac_setpoint'] = $result['ac_setpoint'];
         $result['state'] = $state;
         return $result;
     }
@@ -585,7 +639,7 @@ class thermostatbeEngine {
         if ($mode == self::MODE_OFF) {
             $need['hard'] = true;
             $need['status'] = 'off';
-            $need['reason'] = 'Thermostat à l\'arrêt';
+            $need['reason'] = ($_settings['mode_reason'] !== '') ? $_settings['mode_reason'] : 'Thermostat à l\'arrêt';
             return $need;
         }
         if ($_indoor === null) {
@@ -610,29 +664,29 @@ class thermostatbeEngine {
         }
 
         /*
-         * Le hors-gel, là où l'on ne chauffe pas d'ordinaire : en mode
-         * hors-gel, et du côté froid. Il passe avant la saison et avant le
-         * verrou : une maison à 6 °C se chauffe, même un 15 août, même si la
-         * clim refroidissait il y a une heure. Du côté chauffe, la consigne
-         * normale est de toute façon au-dessus.
+         * Le hors-gel, dans tous les modes sauf l'arrêt. Il passe avant la
+         * saison, avant le verrou et avant les interdits des conditions : une
+         * maison à 6 °C se chauffe, même un 15 août, même alarme armée, même
+         * si la clim refroidissait il y a une heure. Il est vérifié aussi du
+         * côté chauffe : une consigne réglée sous le hors-gel ne doit pas le
+         * désactiver.
          */
-        if ($mode == self::MODE_FROST || $side == self::SEASON_COOL) {
-            $frost = $_settings['frost_setpoint'];
-            $h = $_settings['hysteresis'];
-            $heating = self::isHeating($current);
-            if ($heating ? ($_indoor < $frost + $h) : ($_indoor <= $frost - $h)) {
-                $need['frost'] = true;
-                $need['setpoint'] = $frost;
-                $need['demand'] = 'heat';
-                $need['status'] = 'heating';
-                return $need;
-            }
-            if ($mode == self::MODE_FROST) {
-                $need['setpoint'] = $frost;
-                $need['reason'] = 'Hors-gel : ' . self::formatTemperature($_indoor) . ', rien à faire au-dessus de '
-                    . self::formatTemperature($frost);
-                return $need;
-            }
+        $frost = $_settings['frost_setpoint'];
+        $h = $_settings['hysteresis'];
+        $heating = self::isHeating($current);
+        if ($heating ? ($_indoor < $frost + $h) : ($_indoor <= $frost - $h)) {
+            $need['frost'] = true;
+            $need['setpoint'] = $frost;
+            $need['demand'] = 'heat';
+            $need['status'] = 'heating';
+            return $need;
+        }
+        if ($mode == self::MODE_FROST) {
+            $need['setpoint'] = $frost;
+            $need['reason'] = (($_settings['mode_reason'] !== '') ? $_settings['mode_reason'] . '. ' : '')
+                . 'Hors-gel : ' . self::formatTemperature($_indoor) . ', rien à faire au-dessus de '
+                . self::formatTemperature($frost);
+            return $need;
         }
 
         if ($side == self::SEASON_HEAT) {
@@ -646,6 +700,11 @@ class thermostatbeEngine {
                 if ($_indoor >= $_settings['cool_setpoint'] && $mode == self::MODE_AUTO) {
                     $need['reason'] .= ', et pas de froid en saison de chauffe';
                 }
+                return $need;
+            }
+            if ($_settings['no_heat'] !== '') {
+                $need['status'] = 'blocked';
+                $need['reason'] = 'Chauffe interdite : ' . $_settings['no_heat'];
                 return $need;
             }
             if ($mode == self::MODE_AUTO && !$running) {
@@ -678,6 +737,13 @@ class thermostatbeEngine {
             $need['status'] = 'blocked';
             $need['reason'] = 'Refroidissement demandé, mais aucune clim configurée pour refroidir';
             return $need;
+        }
+        foreach (array('no_cool' => 'Froid interdit : ', 'no_ac' => 'Clim interdite : ') as $key => $prefix) {
+            if ($_settings[$key] !== '') {
+                $need['status'] = 'blocked';
+                $need['reason'] = $prefix . $_settings[$key];
+                return $need;
+            }
         }
         if ($mode == self::MODE_AUTO && !$running) {
             $blocked = self::lockRemaining($_settings, $_state['last_heat_at'], $_now);

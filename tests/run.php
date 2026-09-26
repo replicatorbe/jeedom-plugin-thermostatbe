@@ -113,6 +113,18 @@ for ($i = 0; $i < 6 * 60; $i += 10) {
 verifie('6 h à 22 °C dehors : toujours en chauffe', $m->dernier['season'], 'heat');
 verifieVrai('la moyenne a bougé sans franchir 15 °C', $m->etat['outdoor_avg'] > 8 && $m->etat['outdoor_avg'] < 15);
 
+/* Jeedom redémarré un après-midi doux après deux jours d'arrêt : la moyenne
+ * de la veille ne doit pas être remplacée par la première mesure. */
+$m = new Maison(reglages());
+$m->passe(20.0, 8.0, null, 8.0);
+$m->avance(48 * 60);
+$m->passe(20.0, 24.0);
+verifie('reprise après 48 h, 24 °C dehors, sans historique : toujours chauffe', $m->dernier['season'], 'heat');
+verifieVrai('la moyenne n\'a bougé que d\'une heure', $m->etat['outdoor_avg'] < 9.5);
+$m->avance(48 * 60);
+$m->passe(20.0, 24.0, null, 21.5);
+verifie('reprise avec historique à 21,5 °C : la moyenne le reprend', $m->etat['outdoor_avg'], 21.5);
+
 /* ------------------------------------------------------------------ 3 ---
  * Le cas qui a motivé le plugin : chauffer jusqu'à 24 °C en hiver, puis
  * monter à 25 °C, ne doit JAMAIS lancer la clim en froid. */
@@ -295,6 +307,46 @@ verifie('froid sans clim : rien', $m->passe(28.0, 30.0, null, 25.0), 'idle');
 verifie('statut bloqué', $m->dernier['status'], 'blocked');
 $m = new Maison(array('has_boiler' => 1, 'source' => 'auto'));
 verifie('chaudière seule, clim pas encore installée : chauffe', $m->passe(18.0, 12.0, null, 12.0), 'heat_boiler');
+
+/* ----------------------------------------------------------------- 11 ---
+ * Les conditions de l'utilisateur : alarme armée, maison vide… */
+echo "\nConditions\n";
+$m = new Maison(reglages(array('source' => 'boiler', 'no_heat' => 'alarme armée')));
+verifie('chauffe interdite : 18 °C, rien', $m->passe(18.0, 3.0, null, 3.0), 'idle');
+verifieVrai('la raison nomme la condition', strpos($m->dernier['reason'], 'alarme armée') !== false);
+$m->avance(60);
+verifie('chauffe interdite mais 6 °C : hors-gel quand même', $m->passe(6.0, -5.0), 'heat_boiler');
+
+$m = new Maison(reglages(array('no_cool' => 'personne à la maison')), strtotime('2026-07-15 14:00:00'));
+verifie('froid interdit : 28 °C, rien', $m->passe(28.0, 32.0, null, 25.0), 'idle');
+verifie('statut bloqué', $m->dernier['status'], 'blocked');
+
+$s = thermostatbeEngine::cleanSettings(reglages(array('no_ac' => 'heures pleines')));
+verifie('clim interdite, auto : chaudière', thermostatbeEngine::chooseSource($s, 12.0, null)['source'], 'boiler');
+$s = thermostatbeEngine::cleanSettings(reglages(array('no_boiler' => 'entretien')));
+verifie('chaudière interdite, auto : clim', thermostatbeEngine::chooseSource($s, 0.0, null)['source'], 'ac');
+$s = thermostatbeEngine::cleanSettings(reglages(array('source' => 'boiler', 'no_boiler' => 'entretien')));
+verifie('chaudière imposée mais interdite : rien', thermostatbeEngine::chooseSource($s, 0.0, null)['source'], null);
+$s = thermostatbeEngine::cleanSettings(reglages(array('no_boiler' => 'a', 'no_ac' => 'b')));
+verifie('les deux interdits : rien', thermostatbeEngine::chooseSource($s, 10.0, null)['source'], null);
+
+$m = new Maison(reglages(array('mode' => 'off', 'mode_reason' => 'Alarme armée : thermostat coupé')));
+$m->passe(18.0, 3.0, null, 3.0);
+verifie('mode coupé par une condition : la raison est la sienne', $m->dernier['reason'], 'Alarme armée : thermostat coupé');
+
+/* ----------------------------------------------------------------- 12 ---
+ * Hors-gel et consigne de la clim maintenue. */
+echo "\nCas limites\n";
+$m = new Maison(reglages(array('mode' => 'heat', 'source' => 'boiler', 'heat_setpoint' => 5, 'frost_setpoint' => 7)));
+verifie('consigne 5 °C sous le hors-gel 7 °C : le hors-gel tient', $m->passe(6.0, -5.0, null, -5.0), 'heat_boiler');
+
+$m = new Maison(reglages(array('mode' => 'heat', 'source' => 'ac', 'ac_min_on' => 15)));
+verifie('clim en chauffe', $m->passe(19.0, 10.0, null, 10.0), 'heat_ac');
+verifie('consigne clim 21', $m->dernier['ac_setpoint'], 21.0);
+$m->reglages['mode'] = 'cool';
+$m->avance(2);
+verifie('passage en froid pendant la marche minimale : clim maintenue', $m->passe(27.0, 10.0), 'heat_ac');
+verifie('… avec sa consigne de chauffe, pas 26 °C', $m->dernier['ac_setpoint'], 21.0);
 
 /* ----------------------------------------------------------------- 11 ---
  * Textes. */
