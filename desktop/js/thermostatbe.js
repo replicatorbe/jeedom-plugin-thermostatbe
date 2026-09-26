@@ -1,0 +1,249 @@
+/* This file is part of Jeedom.
+ *
+ * Jeedom is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Jeedom is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Jeedom. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/* ================================================================== OUTILS */
+
+function thermostatbeMarkModified() {
+  if (typeof jeeFrontEnd !== 'undefined') { jeeFrontEnd.modifyWithoutSave = true }
+  window.modifyWithoutSave = true
+}
+
+function thermostatbeCurrentId() {
+  var field = document.querySelector('.eqLogicAttr[data-l1key="id"]')
+  return (field && field.value !== '') ? field.value : null
+}
+
+function thermostatbeText(_tag, _text, _className) {
+  var element = document.createElement(_tag)
+  element.textContent = _text
+  if (_className) { element.className = _className }
+  return element
+}
+
+/* ================================================================ EN CE MOMENT */
+
+/* La couleur de l'étiquette d'état : ce qui tourne, ce qui attend, ce qui est
+   coupé pour une raison qu'il faut regarder. */
+var thermostatbeStatusClass = {
+  heating: 'label-danger',
+  cooling: 'label-info',
+  waiting: 'label-warning',
+  blocked: 'label-warning',
+  window: 'label-warning',
+  safety: 'label-danger',
+  off: 'label-default',
+  idle: 'label-success'
+}
+
+/* Construit en DOM, sans HTML concaténé : les noms de sondes viennent des
+   équipements de l'utilisateur, et un nom contenant une balise ne doit pas
+   s'exécuter dans la page. */
+function thermostatbeShowStatus(_status) {
+  var root = document.getElementById('div_thermostatbeStatus')
+  if (!root) { return }
+  root.innerHTML = ''
+  if (!_status) {
+    root.appendChild(thermostatbeText('span', '{{Pas encore de décision : enregistrez le thermostat, ou cliquez sur « Évaluer maintenant ».}}'))
+    return
+  }
+
+  var head = document.createElement('div')
+  var label = thermostatbeText('span', _status.target, 'label ' + (thermostatbeStatusClass[_status.status] || 'label-default'))
+  label.style.fontSize = '14px'
+  head.appendChild(label)
+  head.appendChild(thermostatbeText('span', '  {{à}} ' + _status.at, 'text-muted'))
+  root.appendChild(head)
+
+  var reason = thermostatbeText('p', _status.reason)
+  reason.style.margin = '8px 0'
+  root.appendChild(reason)
+
+  var rows = [
+    ['{{Intérieur}}', _status.indoor],
+    ['{{Consigne}}', _status.setpoint],
+    ['{{Extérieur}}', _status.outdoor],
+    ['{{Moyenne extérieure}}', _status.outdoor_avg],
+    ['{{Saison}}', _status.season]
+  ]
+  if (_status.ac_setpoint && _status.ac_setpoint !== '—') {
+    rows.push(['{{Consigne envoyée à la clim}}', _status.ac_setpoint])
+  }
+  if (_status.source_why) {
+    rows.push(['{{Choix de l\'appareil}}', _status.source_why])
+  }
+  if (_status.costs) {
+    rows.push(['{{kWh de chaleur}}', '{{chaudière}} ' + _status.costs.boiler.toFixed(3) + ' € · {{clim}} '
+      + _status.costs.ac.toFixed(3) + ' € (COP ' + _status.costs.cop + ')'])
+  }
+  var table = document.createElement('table')
+  table.className = 'table table-condensed'
+  table.style.marginBottom = '6px'
+  rows.forEach(function (row) {
+    var tr = document.createElement('tr')
+    tr.appendChild(thermostatbeText('th', row[0]))
+    tr.appendChild(thermostatbeText('td', row[1]))
+    table.appendChild(tr)
+  })
+  root.appendChild(table)
+
+  if (_status.sensors && _status.sensors.length > 0) {
+    root.appendChild(thermostatbeText('b', '{{Sondes intérieures}}'))
+    var list = document.createElement('ul')
+    list.style.margin = '4px 0 0 0'
+    _status.sensors.forEach(function (sensor) {
+      var text = sensor.name + ' : ' + sensor.value
+      if (sensor.stale) {
+        text = sensor.name + ' : {{muette depuis}} ' + sensor.age + ' — {{écartée}}'
+      } else if (sensor.age) {
+        text += ' ({{il y a}} ' + sensor.age + ')'
+      }
+      list.appendChild(thermostatbeText('li', text, sensor.stale ? 'text-warning' : ''))
+    })
+    root.appendChild(list)
+  }
+}
+
+function thermostatbeLoadStatus(_refresh) {
+  var id = thermostatbeCurrentId()
+  if (id === null) {
+    thermostatbeShowStatus(null)
+    return
+  }
+  domUtils.ajax({
+    type: 'POST',
+    url: 'plugins/thermostatbe/core/ajax/thermostatbe.ajax.php',
+    data: { action: 'status', id: id, refresh: _refresh ? 1 : 0 },
+    dataType: 'json',
+    noDisplayError: true,
+    error: function (request, status, error) {
+      domUtils.handleAjaxError(request, status, error)
+    },
+    success: function (data) {
+      if (data.state != 'ok') {
+        jeedomUtils.showAlert({ message: data.result, level: 'danger' })
+        return
+      }
+      /* La page a pu changer de thermostat pendant l'aller-retour. */
+      if (thermostatbeCurrentId() !== id) { return }
+      thermostatbeShowStatus(data.result)
+    }
+  })
+}
+
+/* ================================================== CYCLE DE VIE DE LA PAGE */
+
+function printEqLogic(_eqLogic) {
+  thermostatbeShowStatus(null)
+  if (isset(_eqLogic.id) && _eqLogic.id != '') {
+    thermostatbeLoadStatus(false)
+  }
+}
+
+/* ================================================================ COMMANDES */
+
+function addCmdToTable(_cmd) {
+  if (!isset(_cmd)) {
+    var _cmd = { configuration: {} }
+  }
+  if (!isset(_cmd.configuration)) {
+    _cmd.configuration = {}
+  }
+
+  /* Le champ caché « id » n'est pas décoratif : sans lui, chaque sauvegarde
+     détruit et recrée les commandes — historique perdu, scénarios cassés. */
+  var tr = '<td>'
+  tr += '<span class="cmdAttr" data-l1key="id" style="display:none;"></span>'
+  tr += '<div class="input-group">'
+  tr += '<input class="cmdAttr form-control input-sm roundedLeft" data-l1key="name" placeholder="{{Nom}}">'
+  tr += '<span class="input-group-btn">'
+  tr += '<a class="cmdAction btn btn-sm btn-default" data-l1key="chooseIcon" title="{{Choisir une icône}}"><i class="fas fa-icons"></i></a>'
+  tr += '</span>'
+  tr += '<span class="cmdAttr input-group-addon roundedRight" data-l1key="display" data-l2key="icon" style="font-size:19px;padding:0 5px 0 0!important;"></span>'
+  tr += '</div>'
+  tr += '</td>'
+  tr += '<td>'
+  tr += '<span class="type" type="' + init(_cmd.type) + '">' + jeedom.cmd.availableType() + '</span>'
+  tr += '<span class="subType" subType="' + init(_cmd.subType) + '"></span>'
+  tr += '</td>'
+  tr += '<td>'
+  tr += '<label class="checkbox-inline"><input type="checkbox" class="cmdAttr" data-l1key="isVisible" checked>{{Afficher}}</label>'
+  if (_cmd.type == 'info') {
+    tr += '<label class="checkbox-inline"><input type="checkbox" class="cmdAttr" data-l1key="isHistorized">{{Historiser}}</label>'
+  }
+  tr += '<span class="cmdAttr" data-l1key="htmlstate" style="display:inline-block;margin-left:5px;"></span>'
+  tr += '</td>'
+  tr += '<td>'
+  if (is_numeric(_cmd.id)) {
+    tr += '<a class="btn btn-default btn-xs cmdAction" data-action="configure"><i class="fas fa-cogs"></i></a> '
+    tr += '<a class="btn btn-default btn-xs cmdAction" data-action="test"><i class="fas fa-rss"></i> {{Tester}}</a> '
+  }
+  tr += '</td>'
+
+  /* Une ligne créée en DOM : insertAdjacentHTML sur la table génère un <tbody>
+     par insertion. */
+  var newRow = document.createElement('tr')
+  newRow.innerHTML = tr
+  newRow.classList.add('cmd')
+  newRow.setAttribute('data-cmd_id', init(_cmd.id))
+  newRow.setAttribute('title', '{{Identifiant interne}} : ' + init(_cmd.logicalId))
+  document.getElementById('table_cmd').querySelector('tbody').appendChild(newRow)
+  newRow.setJeeValues(_cmd, '.cmdAttr')
+  jeedom.cmd.changeType(newRow, init(_cmd.subType))
+}
+
+/* ================================================================ ÉCOUTEURS */
+
+/* Les pages sont chargées en AJAX : les écouteurs sont posés sur le conteneur
+   de page, qui est remplacé à chaque navigation et les emporte avec lui. */
+var thermostatbeContainer = document.getElementById('div_pageContainer') || document.body
+
+thermostatbeContainer.addEventListener('click', function (event) {
+  var target
+
+  /* Choisir une commande : un champ simple est remplacé, un champ multiple
+     (sondes, fenêtres) reçoit la commande en plus des autres. */
+  if (target = event.target.closest('.tbPickCmd')) {
+    var key = target.getAttribute('data-key')
+    var multi = target.getAttribute('data-multi') == '1'
+    var field = document.querySelector('.eqLogicAttr[data-l1key="configuration"][data-l2key="' + key + '"]')
+    jeedom.cmd.getSelectModal({ cmd: { type: target.getAttribute('data-type') } }, function (result) {
+      if (!result || !result.human) { return }
+      if (multi && field.value.trim() !== '') {
+        if (field.value.indexOf(result.human) === -1) {
+          field.value = field.value.trim() + ' ' + result.human
+        }
+      } else {
+        field.value = result.human
+      }
+      thermostatbeMarkModified()
+    })
+    return
+  }
+
+  if (target = event.target.closest('.tbClearCmd')) {
+    var cleared = document.querySelector('.eqLogicAttr[data-l1key="configuration"][data-l2key="' + target.getAttribute('data-key') + '"]')
+    if (cleared && cleared.value !== '') {
+      cleared.value = ''
+      thermostatbeMarkModified()
+    }
+    return
+  }
+
+  if (event.target.closest('#bt_thermostatbeRefresh')) {
+    thermostatbeLoadStatus(true)
+    return
+  }
+})
