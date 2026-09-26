@@ -14,6 +14,7 @@
 
 date_default_timezone_set('Europe/Brussels');
 require_once __DIR__ . '/../core/class/thermostatbeEngine.class.php';
+require_once __DIR__ . '/../core/class/thermostatbeSchedule.class.php';
 
 $ok = 0;
 $ko = 0;
@@ -58,9 +59,10 @@ class Maison {
         $this->now = ($_now === null) ? strtotime('2026-01-15 08:00:00') : $_now;
     }
 
-    public function passe($_interieur, $_exterieur = null, $_fenetre = null, $_seed = null) {
+    public function passe($_interieur, $_exterieur = null, $_fenetre = null, $_seed = null, $_reseau = null) {
         $this->dernier = thermostatbeEngine::decide($this->reglages, array(
             'now'             => $this->now,
+            'grid_power'      => $_reseau,
             'indoor'          => $_interieur,
             'outdoor'         => $_exterieur,
             'outdoor_seed'    => $_seed,
@@ -347,6 +349,68 @@ $m->reglages['mode'] = 'cool';
 $m->avance(2);
 verifie('passage en froid pendant la marche minimale : clim maintenue', $m->passe(27.0, 10.0), 'heat_ac');
 verifie('… avec sa consigne de chauffe, pas 26 °C', $m->dernier['ac_setpoint'], 21.0);
+
+/* ----------------------------------------------------------------- 13 ---
+ * Boost : la consigne du côté actif, décalée le temps qu'il dure. */
+echo "\nBoost\n";
+$m = new Maison(reglages(array('source' => 'boiler', 'heat_setpoint' => 20)));
+verifie('20,5 °C pour 20 : rien', $m->passe(20.5, 3.0, null, 3.0), 'idle');
+$m->reglages['boost'] = 1;
+$m->avance(10);
+verifie('boost + 2 °C : la chaudière démarre', $m->passe(20.5, 3.0), 'heat_boiler');
+verifie('consigne 22', $m->dernier['setpoint'], 22.0);
+verifieVrai('la raison dit Boost', strpos($m->dernier['reason'], 'Boost') === 0);
+$m = new Maison(reglages(array('boost' => 1)), strtotime('2026-07-15 14:00:00'));
+verifie('boost en été : froid à 24 °C (consigne 25 − 2)', $m->passe(24.0, 30.0, null, 25.0), 'cool_ac');
+$m = new Maison(reglages(array('boost' => 1, 'mode' => 'frost', 'source' => 'boiler')));
+verifie('boost en hors-gel : sans effet', $m->passe(12.0, 3.0, null, 3.0), 'idle');
+
+/* ----------------------------------------------------------------- 14 ---
+ * Surplus solaire : facultatif, et désactivé par défaut. */
+echo "\nSurplus solaire\n";
+$s = thermostatbeEngine::cleanSettings(reglages());
+verifie('désactivé : 2 °C dehors, 3 kW exportés, chaudière', thermostatbeEngine::chooseSource($s, 2.0, null, -3000)['source'], 'boiler');
+$s = thermostatbeEngine::cleanSettings(reglages(array('solar_enable' => 1)));
+verifie('activé : 3 kW exportés, clim', thermostatbeEngine::chooseSource($s, 2.0, null, -3000)['source'], 'ac');
+verifie('activé : 500 W exportés, seuil 800, chaudière', thermostatbeEngine::chooseSource($s, 2.0, null, -500)['source'], 'boiler');
+verifie('clim en marche, 200 W importés : on la garde', thermostatbeEngine::chooseSource($s, 2.0, 'ac', 200)['source'], 'ac');
+verifie('clim en marche, 900 W importés : chaudière', thermostatbeEngine::chooseSource($s, 2.0, 'ac', 900)['source'], 'boiler');
+verifie('compteur inconnu : règle habituelle', thermostatbeEngine::chooseSource($s, 2.0, null, null)['source'], 'boiler');
+verifie('trop froid pour la clim : chaudière malgré le surplus', thermostatbeEngine::chooseSource($s, -8.0, null, -3000)['source'], 'boiler');
+$s = thermostatbeEngine::cleanSettings(reglages(array('solar_enable' => 1, 'no_ac' => 'heures pleines')));
+verifie('clim interdite : chaudière malgré le surplus', thermostatbeEngine::chooseSource($s, 2.0, null, -3000)['source'], 'boiler');
+$s = thermostatbeEngine::cleanSettings(reglages(array('solar_enable' => 1, 'source' => 'boiler')));
+verifie('chaudière imposée : le surplus ne change rien', thermostatbeEngine::chooseSource($s, 10.0, null, -3000)['source'], 'boiler');
+$m = new Maison(reglages(array('solar_enable' => 1)));
+verifie('passage complet : surplus, la clim chauffe', $m->passe(19.0, 2.0, null, 2.0, -2500), 'heat_ac');
+
+/* ----------------------------------------------------------------- 15 ---
+ * Programmation horaire. */
+echo "\nProgrammation\n";
+verifie('6h30 normalisé', thermostatbeSchedule::cleanTime('6h30'), '06:30');
+verifie('25:00 refusé', thermostatbeSchedule::cleanTime('25:00'), '');
+$plages = thermostatbeSchedule::cleanSlots(array(
+    array('time' => '22:30', 'days' => array(1, 2, 3, 4, 5, 6, 7), 'preset' => 'eco'),
+    array('time' => '6:30', 'days' => array('1', '2', '3', '4', '5'), 'preset' => 'comfort'),
+    array('time' => '', 'days' => array(1), 'preset' => 'eco'),
+    array('time' => '08:00', 'days' => array(6, 7), 'preset' => 'turbo'),
+));
+verifie('plage sans heure retirée, triées', count($plages), 3);
+verifie('première plage : 06:30', $plages[0]['time'], '06:30');
+verifie('préréglage inconnu = confort', $plages[1]['preset'], 'comfort');
+$lundi = strtotime('2026-09-28 06:30:00');
+$due = thermostatbeSchedule::due($plages, 0, $lundi);
+verifie('lundi 6:30 : confort', $due['slot']['preset'], 'comfort');
+verifie('jouée une seule fois', thermostatbeSchedule::due($plages, $due['at'], $lundi + 60), null);
+verifie('lundi 6:40, jamais jouée : rattrapée', thermostatbeSchedule::due($plages, 0, $lundi + 600)['slot']['preset'], 'comfort');
+verifie('lundi 9:00 : trop tard, abandonnée', thermostatbeSchedule::due($plages, 0, $lundi + 9000), null);
+verifie('samedi 6:30 : rien (semaine seulement)', thermostatbeSchedule::due($plages, 0, strtotime('2026-10-03 06:30:00')), null);
+verifie('samedi 8:00 : confort', thermostatbeSchedule::due($plages, 0, strtotime('2026-10-03 08:00:00'))['slot']['preset'], 'comfort');
+verifie('dimanche 23:00 : éco', thermostatbeSchedule::due($plages, 0, strtotime('2026-10-04 22:31:00'))['slot']['preset'], 'eco');
+$suivante = thermostatbeSchedule::next($plages, strtotime('2026-10-02 23:00:00'));
+verifie('vendredi 23:00, suivante : samedi 08:00', date('Y-m-d H:i', $suivante['at']), '2026-10-03 08:00');
+$off = thermostatbeSchedule::cleanSlots(array(array('enable' => 0, 'time' => '06:30', 'days' => array(1), 'preset' => 'eco')));
+verifie('plage désactivée : jamais jouée', thermostatbeSchedule::due($off, 0, $lundi), null);
 
 /* ----------------------------------------------------------------- 11 ---
  * Textes. */

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3
+
+- **Tuile du tableau de bord** : température, état, deux consignes réglables au
+  doigt, mode, préréglage, boost, raison et temps de marche du jour.
+- **Boost** : +2 °C (ou −2 °C en froid) pendant 60 minutes, réglables.
+- **Programmation horaire** : préréglages par jour et par heure, suspendable
+  par commande.
+- **Essai des appareils** depuis la page.
+- **Notifications** : sondes perdues, fenêtre ouverte trop longtemps, appareil
+  qui ne suit pas les ordres.
+- **Temps de marche et coût estimé du jour**, historisés.
+- **Priorité au surplus solaire**, facultative et désactivée par défaut.
+- Le préréglage « Manuel » apparaît dans la liste.
+
 ## 0.2
 
 - Onglet **Conditions** : une expression vraie (alarme armée, maison vide,

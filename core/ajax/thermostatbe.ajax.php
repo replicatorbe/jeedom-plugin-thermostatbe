@@ -64,6 +64,31 @@ try {
         ajax::success(thermostatbe::byId($eqLogic->getId())->status());
     }
 
+    /* Essai d'un appareil : seules les paires connues passent, et seulement
+     * sur les commandes enregistrées dans le thermostat — jamais une commande
+     * désignée par le navigateur. */
+    if (init('action') == 'testDevice') {
+        $eqLogic = $getThermostat(init('id'));
+        $until = $eqLogic->testDevice(init('device'), init('do'));
+        ajax::success(array('until' => date('H:i:s', $until)));
+    }
+
+    if (init('action') == 'boost') {
+        $eqLogic = $getThermostat(init('id'));
+        if (init('on') == 1) {
+            $eqLogic->startBoost();
+        } else {
+            $eqLogic->stopBoost();
+        }
+        ajax::success(thermostatbe::byId($eqLogic->getId())->status());
+    }
+
+    if (init('action') == 'schedule') {
+        $eqLogic = $getThermostat(init('id'));
+        $eqLogic->setScheduleEnabled(init('on') == 1);
+        ajax::success(thermostatbe::byId($eqLogic->getId())->status());
+    }
+
     throw new Exception(__('Aucune méthode correspondante à :', __FILE__) . ' ' . init('action'));
 } catch (Exception $e) {
     ajax::error(displayException($e), $e->getCode());

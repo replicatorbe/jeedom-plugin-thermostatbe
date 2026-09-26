@@ -141,6 +141,16 @@ var thermostatbeRendering = false
 function thermostatbeFillRuntime(_runtime) {
   thermostatbeRendering = true
   try {
+    var schedule = document.getElementById('cb_thermostatbeSchedule')
+    if (schedule) { schedule.checked = (_runtime.schedule == 1) }
+    var next = document.getElementById('span_thermostatbeNextSchedule')
+    if (next) { next.textContent = _runtime.next_schedule ? '{{Prochain}} : ' + _runtime.next_schedule : '' }
+    var boost = document.getElementById('bt_thermostatbeBoost')
+    if (boost) {
+      boost.classList.toggle('btn-danger', _runtime.boost_until !== '')
+      boost.querySelector('span').textContent = (_runtime.boost_until !== '') ? '{{Boost jusqu\'à}} ' + _runtime.boost_until + ' — {{arrêter}}' : '{{Boost}}'
+      boost.setAttribute('data-on', (_runtime.boost_until !== '') ? '1' : '0')
+    }
     document.querySelectorAll('.tbRuntime').forEach(function (field) {
       var key = field.getAttribute('data-key')
       if (!isset(_runtime[key])) { return }
@@ -216,6 +226,42 @@ function thermostatbeLoadStatus(_refresh) {
   })
 }
 
+/* ========================================================= PROGRAMMATION */
+
+function thermostatbeAddSlot(_slot) {
+  var template = document.getElementById('tpl_thermostatbeSlot')
+  var body = document.querySelector('#table_thermostatbeSchedule tbody')
+  if (!template || !body) { return }
+  var row = template.content.firstElementChild.cloneNode(true)
+  if (_slot) {
+    row.querySelector('.tbSlotAttr[data-key="enable"]').checked = (_slot.enable != 0)
+    row.querySelector('.tbSlotAttr[data-key="time"]').value = _slot.time || '06:30'
+    row.querySelector('.tbSlotAttr[data-key="preset"]').value = _slot.preset || 'comfort'
+    var days = Array.isArray(_slot.days) ? _slot.days.map(Number) : []
+    row.querySelectorAll('.tbSlotDay').forEach(function (box) {
+      box.checked = days.indexOf(Number(box.getAttribute('data-day'))) !== -1
+    })
+  }
+  body.appendChild(row)
+}
+
+function thermostatbeReadSlots() {
+  var slots = []
+  document.querySelectorAll('#table_thermostatbeSchedule .tbSlot').forEach(function (row) {
+    var days = []
+    row.querySelectorAll('.tbSlotDay').forEach(function (box) {
+      if (box.checked) { days.push(Number(box.getAttribute('data-day'))) }
+    })
+    slots.push({
+      enable: row.querySelector('.tbSlotAttr[data-key="enable"]').checked ? 1 : 0,
+      time: row.querySelector('.tbSlotAttr[data-key="time"]').value,
+      days: days,
+      preset: row.querySelector('.tbSlotAttr[data-key="preset"]').value
+    })
+  })
+  return slots
+}
+
 /* ============================================================ CONDITIONS */
 
 function thermostatbeAddCondition(_condition) {
@@ -257,6 +303,10 @@ function printEqLogic(_eqLogic) {
   if (body) { body.innerHTML = '' }
   var conditions = Array.isArray(configuration.conditions) ? configuration.conditions : []
   conditions.forEach(function (condition) { thermostatbeAddCondition(condition) })
+  var slotBody = document.querySelector('#table_thermostatbeSchedule tbody')
+  if (slotBody) { slotBody.innerHTML = '' }
+  var slots = Array.isArray(configuration.schedule) ? configuration.schedule : []
+  slots.forEach(function (slot) { thermostatbeAddSlot(slot) })
 
   thermostatbeShowStatus(null)
   var saved = isset(_eqLogic.id) && _eqLogic.id != ''
@@ -271,6 +321,7 @@ function printEqLogic(_eqLogic) {
 function saveEqLogic(_eqLogic) {
   if (!isset(_eqLogic.configuration)) { _eqLogic.configuration = {} }
   _eqLogic.configuration.conditions = thermostatbeReadConditions()
+  _eqLogic.configuration.schedule = thermostatbeReadSlots()
   return _eqLogic
 }
 
@@ -369,6 +420,37 @@ thermostatbeContainer.addEventListener('click', function (event) {
     return
   }
 
+  if (event.target.closest('#bt_thermostatbeAddSlot')) {
+    thermostatbeAddSlot(null)
+    thermostatbeMarkModified()
+    return
+  }
+
+  if (target = event.target.closest('.tbSlotRemove')) {
+    target.closest('.tbSlot').remove()
+    thermostatbeMarkModified()
+    return
+  }
+
+  if (target = event.target.closest('.tbTest')) {
+    var testId = thermostatbeCurrentId()
+    if (testId === null) { return }
+    thermostatbeRequest({ action: 'testDevice', id: testId, device: target.getAttribute('data-device'), do: target.getAttribute('data-do') },
+      function (result) {
+        jeedomUtils.showAlert({ message: '{{Ordre envoyé. Le thermostat reprend la main à}} ' + result.until + '.', level: 'success', timeOut: 5000 })
+      })
+    return
+  }
+
+  if (target = event.target.closest('#bt_thermostatbeBoost')) {
+    var boostId = thermostatbeCurrentId()
+    if (boostId === null) { return }
+    thermostatbeRequest({ action: 'boost', id: boostId, on: target.getAttribute('data-on') == '1' ? 0 : 1 }, function (result) {
+      thermostatbeShowStatus(result)
+    })
+    return
+  }
+
   if (event.target.closest('#bt_thermostatbeAddCondition')) {
     thermostatbeAddCondition(null)
     thermostatbeMarkModified()
@@ -400,9 +482,18 @@ thermostatbeContainer.addEventListener('change', function (event) {
     if (!thermostatbeRendering) { thermostatbeSetRuntime(field) }
     return
   }
-  /* Les champs des conditions ne sont pas des .eqLogicAttr : le coeur ne les
-     voit pas changer, et quitterait la page sans prévenir. */
-  if (event.target.closest('.tbCondAttr')) {
+  if (event.target.id == 'cb_thermostatbeSchedule') {
+    if (thermostatbeRendering) { return }
+    var scheduleId = thermostatbeCurrentId()
+    if (scheduleId === null) { return }
+    thermostatbeRequest({ action: 'schedule', id: scheduleId, on: event.target.checked ? 1 : 0 }, function (result) {
+      thermostatbeShowStatus(result)
+    }, function () { thermostatbeLoadStatus(false) })
+    return
+  }
+  /* Les champs des conditions et des plages ne sont pas des .eqLogicAttr :
+     le coeur ne les voit pas changer, et quitterait la page sans prévenir. */
+  if (event.target.closest('.tbCondAttr') || event.target.closest('.tbSlotAttr') || event.target.closest('.tbSlotDay')) {
     thermostatbeMarkModified()
   }
 })

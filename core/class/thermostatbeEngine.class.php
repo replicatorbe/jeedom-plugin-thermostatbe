@@ -123,6 +123,10 @@ class thermostatbeEngine {
         'cost_margin'         => 10,
         'cool_min_outdoor'    => null,
         'window_delay'        => 60,
+        'boost_delta'         => 2.0,
+        'boost_minutes'       => 60,
+        'solar_export_min'    => 800,
+        'solar_import_max'    => 300,
     );
 
     /* [minimum, maximum] de chaque réglage numérique. */
@@ -153,6 +157,10 @@ class thermostatbeEngine {
         'cost_margin'         => array(0, 50),
         'cool_min_outdoor'    => array(-10, 40),
         'window_delay'        => array(0, 3600),
+        'boost_delta'         => array(0.5, 5),
+        'boost_minutes'       => array(5, 480),
+        'solar_export_min'    => array(0, 20000),
+        'solar_import_max'    => array(0, 5000),
     );
 
     /* ============================================================ RÉGLAGES */
@@ -241,6 +249,8 @@ class thermostatbeEngine {
         }
         $clean['mode_reason'] = (isset($settings['mode_reason']) && is_string($settings['mode_reason']))
             ? trim($settings['mode_reason']) : '';
+        $clean['boost'] = !empty($settings['boost']);
+        $clean['solar_enable'] = !empty($settings['solar_enable']);
         return $clean;
     }
 
@@ -422,7 +432,7 @@ class thermostatbeEngine {
      * marge, deux coûts voisins feraient alterner chaudière et clim d'une
      * minute à l'autre au gré de la sonde extérieure.
      */
-    public static function chooseSource($_settings, $_outdoor, $_previous) {
+    public static function chooseSource($_settings, $_outdoor, $_previous, $_grid = null) {
         $hasBoiler = $_settings['has_boiler'];
         $hasAc = $_settings['has_ac_heat'];
         $noBoiler = $_settings['no_boiler'];
@@ -473,6 +483,25 @@ class thermostatbeEngine {
         }
 
         $previous = ($_previous === 'boiler' || $_previous === 'ac') ? $_previous : null;
+
+        /*
+         * Le surplus solaire, s'il est activé : de l'électricité qui partirait
+         * sur le réseau pour presque rien chauffe la maison par la clim.
+         *
+         * Deux seuils et non un : pour démarrer, il faut exporter nettement ;
+         * pour continuer, il suffit de ne pas trop importer. La clim en marche
+         * consomme justement le surplus qui l'a fait démarrer : avec un seul
+         * seuil, elle s'arrêterait à la minute suivante, faute de surplus.
+         */
+        if ($_settings['solar_enable'] && $_grid !== null) {
+            if ($previous == 'ac' && $_grid <= $_settings['solar_import_max']) {
+                return array('source' => 'ac', 'why' => 'surplus solaire (' . self::formatPower($_grid) . ' au compteur)', 'solar' => true);
+            }
+            if ($_grid <= -$_settings['solar_export_min']) {
+                return array('source' => 'ac', 'why' => 'surplus solaire (' . self::formatPower($_grid) . ' au compteur)', 'solar' => true);
+            }
+        }
+
         $costs = self::heatCosts($_settings, $_outdoor);
         if ($costs !== null) {
             $margin = 1 + $_settings['cost_margin'] / 100;
@@ -526,6 +555,7 @@ class thermostatbeEngine {
         $outdoor = isset($_inputs['outdoor']) ? self::number($_inputs['outdoor']) : null;
         $seed = isset($_inputs['outdoor_seed']) ? self::number($_inputs['outdoor_seed']) : null;
         $windowFor = isset($_inputs['window_open_for']) ? $_inputs['window_open_for'] : null;
+        $grid = isset($_inputs['grid_power']) ? self::number($_inputs['grid_power']) : null;
 
         $state = self::updateOutdoorAverage($state, $outdoor, $now, $seed);
         $season = self::season($settings, $state['outdoor_avg'], $state['season']);
@@ -552,7 +582,7 @@ class thermostatbeEngine {
         $wanted = self::IDLE;
 
         if ($need['demand'] == 'heat') {
-            $choice = self::chooseSource($settings, $outdoor, $state['heat_source']);
+            $choice = self::chooseSource($settings, $outdoor, $state['heat_source'], $grid);
             $result['source_why'] = $choice['why'];
             if ($choice['source'] === null) {
                 $result['status'] = 'blocked';
@@ -570,6 +600,9 @@ class thermostatbeEngine {
             $wanted = self::COOL_AC;
             $result['reason'] = 'Refroidissement par la clim : ' . self::formatTemperature($indoor)
                 . ' pour ' . self::formatTemperature($need['setpoint']);
+        }
+        if ($need['boost'] && $wanted != self::IDLE) {
+            $result['reason'] = 'Boost. ' . $result['reason'];
         }
         $result['wanted'] = $wanted;
 
@@ -632,7 +665,7 @@ class thermostatbeEngine {
      */
     private static function need($_settings, $_indoor, $_outdoor, $_windowFor, $_season, $_state, $_now) {
         $need = array('demand' => 'none', 'setpoint' => null, 'hard' => false, 'frost' => false,
-                      'status' => 'idle', 'reason' => '');
+                      'boost' => false, 'status' => 'idle', 'reason' => '');
         $mode = $_settings['mode'];
         $current = $_state['target'];
 
@@ -689,8 +722,17 @@ class thermostatbeEngine {
             return $need;
         }
 
+        /*
+         * Le boost décale la consigne du côté actif, le temps qu'il dure. Il
+         * ne passe outre ni la saison, ni le verrou, ni les conditions : un
+         * boost en janvier chauffe plus fort, il ne rafraîchit pas.
+         */
+        $boost = ($_settings['boost'] && in_array($mode, array(self::MODE_AUTO, self::MODE_HEAT, self::MODE_COOL), true))
+            ? $_settings['boost_delta'] : 0;
+        $need['boost'] = ($boost > 0);
+
         if ($side == self::SEASON_HEAT) {
-            $sp = $_settings['heat_setpoint'];
+            $sp = min(self::BOUNDS['heat_setpoint'][1], $_settings['heat_setpoint'] + $boost);
             $need['setpoint'] = $sp;
             $hh = self::hysteresisFor($_settings, $current, 'heat');
             $running = self::isHeating($current);
@@ -721,7 +763,7 @@ class thermostatbeEngine {
             return $need;
         }
 
-        $sp = $_settings['cool_setpoint'];
+        $sp = max(self::BOUNDS['cool_setpoint'][0], $_settings['cool_setpoint'] - $boost);
         $need['setpoint'] = $sp;
         $hc = self::hysteresisFor($_settings, $current, 'cool');
         $running = ($current == self::COOL_AC);
@@ -879,6 +921,10 @@ class thermostatbeEngine {
             return '—';
         }
         return str_replace('.', ',', (string) round($_value, 1)) . ' °C';
+    }
+
+    public static function formatPower($_watts) {
+        return ($_watts < 0 ? '−' : '+') . round(abs($_watts)) . ' W';
     }
 
     public static function formatPrice($_value) {

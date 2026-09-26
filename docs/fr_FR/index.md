@@ -49,6 +49,11 @@ Et des garde-fous qui retardent une décision sans jamais en inventer une :
 - **Fenêtres** (facultatif) : ouvertes plus d'une minute, le thermostat se met
   en pause et reprend seul à la fermeture.
 
+**Notifications** (facultatif) : une commande de message (Telegram, SMS,
+appli mobile). Un message par épisode : sondes perdues puis revenues, fenêtre
+ouverte depuis plus de 30 minutes (réglable, 0 pour jamais), relais de la
+chaudière ou clim qui ne suit pas les ordres.
+
 Le panneau **En ce moment** montre la dernière décision et sa raison, en toutes
 lettres : « Froid bloqué : on chauffait encore il y a peu, verrou encore
 7 h 12 ».
@@ -70,6 +75,15 @@ jamais relancée à l'aveugle, car elle bipe à chaque ordre.
 
 Tant que la clim n'est pas configurée, le thermostat chauffe à la chaudière et
 ne refroidit pas.
+
+**Essai** : les boutons de chaque appareil l'allument, l'éteignent ou changent
+son mode avec les commandes enregistrées — c'est la façon de vérifier qu'on a
+choisi les bonnes. Le thermostat laisse faire 2 minutes, puis remet chaque
+appareil dans l'état qu'il a décidé.
+
+**Consommation** (facultatif) : la puissance gaz de la chaudière brûleur
+allumé, la puissance électrique moyenne de la clim. Avec les prix de l'onglet
+Réglages, elles donnent le coût estimé du jour.
 
 **Corriger la télécommande** : coché, une clim dont l'état remonté contredit le
 thermostat reçoit à nouveau l'ordre (au plus toutes les 5 minutes) — c'est ce
@@ -119,6 +133,25 @@ clim*, *Ne pas utiliser la chaudière*.
   fausse) et le journal le signale : une faute de frappe ne coupe pas le
   chauffage.
 
+### Onglet Programmation
+
+Des plages qui changent de préréglage à heure fixe, les jours cochés : Confort
+à 6 h 30 en semaine, Éco à 22 h 30 tous les jours. Comme sur un thermostat
+mural, une plage est un **changement** : entre deux plages, ce que vous réglez à
+la main tient jusqu'au changement suivant. Une plage manquée de plus de
+15 minutes (Jeedom arrêté) n'est pas rattrapée.
+
+La case **Programmation active** s'applique immédiatement ; les commandes
+*Activer / Suspendre la programmation* font la même chose depuis un scénario
+(vacances, invités).
+
+## Boost
+
+Le bouton **Boost** (tuile, page, commande) décale la consigne du côté actif de
+2 °C pendant 60 minutes — plus chaud en hiver, plus frais en été. Les deux
+valeurs se règlent. Le boost ne passe outre ni la saison, ni les conditions, ni
+les sécurités, et s'arrête tout seul.
+
 ## Chaudière ou clim : le choix automatique
 
 Avec **Chauffer avec : Auto**, le plugin compare le prix d'un kWh de chaleur :
@@ -131,6 +164,17 @@ Il ne change d'appareil que si l'autre est moins cher d'au moins 10 %. Les prix
 peuvent être des nombres ou des commandes info (`#[…]#`) pour un tarif
 dynamique. Sans prix, la règle est la température extérieure : clim au-dessus
 de 5 °C. Sous −5 °C, toujours la chaudière.
+
+### Priorité au surplus solaire (désactivée par défaut)
+
+Cochez **Activer** et choisissez la puissance au compteur (positive quand la
+maison importe, négative quand elle exporte — la puissance active du P1
+HomeWizard, par exemple). En source Auto, la clim chauffe dès que la maison
+exporte plus de 800 W, et continue tant qu'elle importe moins de 300 W : la
+clim consomme justement le surplus qui l'a fait démarrer, un seul seuil la
+ferait s'arrêter à la minute suivante. Le surplus ne passe outre ni une source
+imposée, ni *Ne pas utiliser la clim*, ni le plancher de température de la clim.
+Une mesure de plus de 10 minutes est ignorée.
 
 Pour forcer un appareil selon les prix du moment, choisissez simplement
 *La chaudière* ou *La clim* : c'est un choix, le plugin le suit.
@@ -148,6 +192,18 @@ Pour forcer un appareil selon les prix du moment, choisissez simplement
 | Raison | info | Pourquoi le thermostat fait ce qu'il fait |
 | Saison | info | Chauffe ou Froid |
 | En marche, Chauffe, Refroidit | info binaire | Historisées |
+| Boost, Arrêter le boost | action | Boost actif, Fin du boost en info |
+| Activer / Suspendre la programmation | action | Programmation active, Prochain changement en info |
+| Chaudière / Clim chaud / Clim froid du jour | info | Minutes de marche, historisées |
+| Coût estimé du jour | info | En €, si puissances et prix sont renseignés |
+
+## Tuile du tableau de bord
+
+La tuile montre la température, l'état (orange en chauffe, bleu en froid), les
+deux consignes réglables par crans de 0,5 °C — la consigne du côté actif est
+mise en avant —, le mode, le préréglage, le bouton Boost, la raison de la
+décision et, en pied, la température extérieure, la saison et le temps de marche
+du jour. Sur mobile, c'est le widget standard de Jeedom.
 
 Les préréglages règlent les deux consignes d'un coup : un scénario ou l'agenda
 les appelle pour la nuit ou les absences.

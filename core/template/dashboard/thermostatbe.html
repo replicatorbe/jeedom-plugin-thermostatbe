@@ -1,0 +1,187 @@
+<div class="eqLogic eqLogic-widget #class# #category# tbw" data-eqType="#eqType#" data-eqLogic_id="#id#" data-eqLogic_uid="#uid#" data-version="#version#" data-translate-category="#translate_category#" data-category="#category#" data-tags="#tags#" data-tb-ids="#tb_ids#" data-tb-state="#tb_state#" data-tb-modes="#tb_modes#" data-tb-presets="#tb_presets#" style="width: #width#;height: #height#;#style#">
+  <div class="widget-name">
+    <span style="color:#background-color#" title="#alert_name#"><i class='#alert_icon#'></i></span>
+    <span class="cmd refresh pull-right cursor" data-cmd_id="#refresh_id#" title="{{Évaluer maintenant}}"><i class="fas fa-sync"></i></span>
+    <span class="reportModeVisible">#name_display# <span class="object_name">#object_name#</span></span>
+    <a href="#eqLink#" class="reportModeHidden">#name_display# <span class="object_name">#object_name#</span></a>
+  </div>
+
+  <div class="tbw-body" data-role="body" data-activity="idle">
+    <div class="tbw-top">
+      <div class="tbw-temp"><span data-role="temperature">—</span><small>°C</small></div>
+      <div class="tbw-chip" data-role="chip"><i class="fas fa-pause" data-role="chip-icon"></i> <span data-role="chip-text"></span></div>
+    </div>
+
+    <div class="tbw-sp" data-side="heat">
+      <i class="fas fa-fire tbw-sp-icon" title="{{Chauffer jusqu'à}}"></i>
+      <button type="button" class="tbw-btn" data-step="-0.5" data-side="heat" title="{{Moins}}"><i class="fas fa-minus"></i></button>
+      <span class="tbw-sp-value" data-role="heat">—</span>
+      <button type="button" class="tbw-btn" data-step="0.5" data-side="heat" title="{{Plus}}"><i class="fas fa-plus"></i></button>
+    </div>
+    <div class="tbw-sp" data-side="cool">
+      <i class="fas fa-snowflake tbw-sp-icon" title="{{Refroidir à partir de}}"></i>
+      <button type="button" class="tbw-btn" data-step="-0.5" data-side="cool" title="{{Moins}}"><i class="fas fa-minus"></i></button>
+      <span class="tbw-sp-value" data-role="cool">—</span>
+      <button type="button" class="tbw-btn" data-step="0.5" data-side="cool" title="{{Plus}}"><i class="fas fa-plus"></i></button>
+    </div>
+
+    <div class="tbw-row">
+      <select class="tbw-select" data-role="mode" title="{{Mode}}"></select>
+      <select class="tbw-select" data-role="preset" title="{{Préréglage}}"></select>
+    </div>
+    <button type="button" class="tbw-boost" data-role="boost"><i class="fas fa-rocket"></i> <span data-role="boost-text">{{Boost}}</span></button>
+
+    <div class="tbw-reason" data-role="reason"></div>
+    <div class="tbw-foot" data-role="foot"></div>
+  </div>
+
+  <style>
+    .tbw .tbw-body { padding: 4px 10px 8px 10px; text-align: left; }
+    .tbw .tbw-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .tbw .tbw-temp { font-size: 34px; font-weight: 300; line-height: 1; }
+    .tbw .tbw-temp small { font-size: 14px; margin-left: 2px; opacity: .7; }
+    .tbw .tbw-chip { font-size: 12px; padding: 3px 9px; border-radius: 12px; background: rgba(128,128,128,.18); white-space: nowrap; }
+    .tbw [data-activity="heating"] .tbw-chip { background: #f27a1a; color: #fff; }
+    .tbw [data-activity="cooling"] .tbw-chip { background: #2b8cd8; color: #fff; }
+    .tbw .tbw-sp { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; opacity: .55; }
+    .tbw .tbw-sp.tbw-active { opacity: 1; background: rgba(128,128,128,.12); }
+    .tbw .tbw-sp-icon { width: 18px; text-align: center; }
+    .tbw .tbw-sp[data-side="heat"] .tbw-sp-icon { color: #f27a1a; }
+    .tbw .tbw-sp[data-side="cool"] .tbw-sp-icon { color: #2b8cd8; }
+    .tbw .tbw-sp-value { flex: 1; text-align: center; font-size: 18px; font-weight: 500; }
+    .tbw .tbw-btn { width: 30px; height: 26px; border: 0; border-radius: 5px; background: rgba(128,128,128,.22); color: inherit; }
+    .tbw .tbw-btn:hover { background: rgba(128,128,128,.35); }
+    .tbw .tbw-row { display: flex; gap: 6px; margin-top: 6px; }
+    .tbw .tbw-select { flex: 1; min-width: 0; height: 26px; border-radius: 5px; border: 1px solid rgba(128,128,128,.35); background: transparent; color: inherit; }
+    .tbw .tbw-select option { color: #000; }
+    .tbw .tbw-boost { width: 100%; margin-top: 6px; height: 28px; border: 0; border-radius: 5px; background: rgba(128,128,128,.22); color: inherit; }
+    .tbw .tbw-boost.tbw-on { background: #d6332b; color: #fff; }
+    .tbw .tbw-reason { font-size: 11px; margin-top: 6px; opacity: .85; line-height: 1.3; }
+    .tbw .tbw-foot { font-size: 11px; margin-top: 4px; opacity: .6; }
+  </style>
+
+  <script>
+    (function () {
+      const widget = document.querySelector('.eqLogic[data-eqLogic_uid="#uid#"]')
+      if (widget === null) { return }
+      /* Identifiants et valeurs passent par des attributs data : échappés côté
+         serveur, ils ne peuvent rien injecter ici. */
+      const ids = JSON.parse(widget.getAttribute('data-tb-ids') || '{}')
+      const state = JSON.parse(widget.getAttribute('data-tb-state') || '{}')
+      const modes = JSON.parse(widget.getAttribute('data-tb-modes') || '{}')
+      const presets = JSON.parse(widget.getAttribute('data-tb-presets') || '{}')
+      const $ = function (_role) { return widget.querySelector('[data-role="' + _role + '"]') }
+
+      function val(_key) {
+        return (state[_key] === undefined || state[_key] === null) ? '' : String(state[_key])
+      }
+      function num(_key) {
+        const n = parseFloat(val(_key))
+        return isNaN(n) ? null : n
+      }
+      function fmt(_n) {
+        return (_n === null) ? '—' : _n.toFixed(1).replace('.', ',')
+      }
+
+      function exec(_logicalId, _value) {
+        if (!ids[_logicalId]) { return }
+        jeedom.cmd.execute({
+          id: ids[_logicalId], value: _value || {},
+          error: function (_error) {
+            jeedomUtils.showAlert({ message: (_error && _error.message) ? _error.message : '{{Le thermostat ne répond pas}}', level: 'danger' })
+          }
+        })
+      }
+
+      function fill(_select, _options) {
+        _select.innerHTML = ''
+        Object.keys(_options).forEach(function (_key) {
+          const option = document.createElement('option')
+          option.value = _key
+          option.textContent = _options[_key]
+          _select.appendChild(option)
+        })
+      }
+      fill($('mode'), modes)
+      fill($('preset'), presets)
+
+      /* Le côté qui compte en ce moment : celui du mode imposé, ou celui de
+         la saison en automatique. */
+      function activeSide() {
+        const mode = val('mode')
+        if (mode === 'heat' || mode === 'frost') { return 'heat' }
+        if (mode === 'cool') { return 'cool' }
+        if (mode === 'off') { return '' }
+        return (val('season') === 'Froid') ? 'cool' : 'heat'
+      }
+
+      /* Les crans de consigne s'additionnent pendant 700 ms avant d'être
+         envoyés : trois appuis font un ordre, pas trois. */
+      const pending = { heat: null, cool: null }
+      const timers = { heat: null, cool: null }
+
+      function render() {
+        $('temperature').textContent = fmt(num('temperature'))
+        $('heat').textContent = fmt(pending.heat !== null ? pending.heat : num('heat_setpoint'))
+        $('cool').textContent = fmt(pending.cool !== null ? pending.cool : num('cool_setpoint'))
+        const side = activeSide()
+        widget.querySelectorAll('.tbw-sp').forEach(function (_row) {
+          _row.classList.toggle('tbw-active', _row.getAttribute('data-side') === side)
+        })
+        const label = val('state')
+        const activity = (label.indexOf('Chauffe') === 0) ? 'heating' : ((label.indexOf('Refroid') === 0) ? 'cooling' : 'idle')
+        $('body').setAttribute('data-activity', activity)
+        $('chip-icon').className = 'fas ' + (activity === 'heating' ? 'fa-fire' : (activity === 'cooling' ? 'fa-snowflake' : (val('window') === '1' ? 'fa-window-maximize' : 'fa-pause')))
+        $('chip-text').textContent = label
+        $('mode').value = val('mode')
+        $('preset').value = val('preset') || 'manual'
+        const boost = val('boost') === '1'
+        $('boost').classList.toggle('tbw-on', boost)
+        $('boost-text').textContent = boost ? '{{Boost jusqu\'à}} ' + val('boost_until') + ' — {{arrêter}}' : '{{Boost}}'
+        $('reason').textContent = val('reason')
+        const foot = []
+        if (num('outdoor') !== null) { foot.push('{{Dehors}} ' + fmt(num('outdoor')) + ' °C') }
+        if (val('season') !== '') { foot.push('{{saison}} ' + val('season').toLowerCase()) }
+        const minutes = function (_key, _label) {
+          const n = num(_key)
+          if (n !== null && n > 0) { foot.push(_label + ' ' + Math.round(n) + ' min') }
+        }
+        minutes('runtime_boiler', '{{chaudière}}')
+        minutes('runtime_ac_heat', '{{clim chaud}}')
+        minutes('runtime_ac_cool', '{{clim froid}}')
+        if (num('cost_today') !== null && num('cost_today') > 0) { foot.push(fmt(num('cost_today')) + ' €') }
+        $('foot').textContent = foot.join(' · ')
+      }
+
+      widget.querySelectorAll('.tbw-btn').forEach(function (_button) {
+        _button.addEventListener('click', function (_event) {
+          _event.stopPropagation()
+          const side = _button.getAttribute('data-side')
+          const base = (pending[side] !== null) ? pending[side] : num(side + '_setpoint')
+          if (base === null) { return }
+          pending[side] = Math.round((base + parseFloat(_button.getAttribute('data-step'))) * 2) / 2
+          render()
+          clearTimeout(timers[side])
+          timers[side] = setTimeout(function () {
+            const value = pending[side]
+            pending[side] = null
+            exec('set_' + side + '_setpoint', { slider: value })
+          }, 700)
+        })
+      })
+      $('mode').addEventListener('change', function () { exec('set_mode', { select: $('mode').value }) })
+      $('preset').addEventListener('change', function () { exec('set_preset', { select: $('preset').value }) })
+      $('boost').addEventListener('click', function () { exec(val('boost') === '1' ? 'boost_off' : 'boost_on') })
+
+      Object.keys(state).forEach(function (_key) {
+        if (!ids[_key]) { return }
+        jeedom.cmd.addUpdateFunction(ids[_key], function (_options) {
+          if (document.querySelector('.eqLogic[data-eqLogic_uid="#uid#"]') === null) { return }
+          state[_key] = (_options.value === null || _options.value === undefined) ? '' : String(_options.value)
+          render()
+        })
+      })
+      render()
+    })()
+  </script>
+</div>

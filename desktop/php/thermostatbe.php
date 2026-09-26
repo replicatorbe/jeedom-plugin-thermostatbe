@@ -113,6 +113,7 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 			<li role="presentation" class="active"><a href="#eqlogictab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-thermometer-half"></i><span class="hidden-xs"> {{Thermostat}}</span></a></li>
 			<li role="presentation"><a href="#devicetab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-fire"></i><span class="hidden-xs"> {{Appareils}}</span></a></li>
 			<li role="presentation"><a href="#settingstab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-sliders-h"></i><span class="hidden-xs"> {{Réglages}}</span></a></li>
+			<li role="presentation"><a href="#scheduletab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-clock"></i><span class="hidden-xs"> {{Programmation}}</span></a></li>
 			<li role="presentation"><a href="#conditiontab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-user-shield"></i><span class="hidden-xs"> {{Conditions}}</span></a></li>
 			<li role="presentation"><a href="#commandtab" aria-controls="home" role="tab" data-toggle="tab"><i class="fas fa-list"></i><span class="hidden-xs"> {{Commandes}}</span></a></li>
 		</ul>
@@ -186,11 +187,31 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 								</div>
 							</div>
 						</fieldset>
+						<fieldset>
+							<legend><i class="fas fa-bell"></i> {{Notifications}}</legend>
+							<?php
+							thermostatbeCmdField('notify_cmd', '{{Prévenir par}}', 'action', false,
+								'{{Facultatif. Une commande de message : Telegram, SMS, notification de l\'appli mobile. Un message par épisode — sondes perdues puis revenues, fenêtre ouverte trop longtemps, chaudière ou clim qui ne suit pas les ordres.}}');
+							?>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Fenêtre ouverte depuis}}</label>
+								<div class="col-sm-3">
+									<div class="input-group">
+										<input type="text" class="eqLogicAttr form-control roundedLeft" data-l1key="configuration" data-l2key="notify_window" placeholder="30">
+										<span class="input-group-addon roundedRight">{{min}}</span>
+									</div>
+								</div>
+								<div class="col-sm-4">
+									<span class="help-block" style="margin:0;">{{0 : jamais de message pour une fenêtre.}}</span>
+								</div>
+							</div>
+						</fieldset>
 					</form>
 				</div>
 				<div class="col-lg-6">
 					<legend><i class="fas fa-heartbeat"></i> {{En ce moment}}
 						<a class="btn btn-default btn-xs pull-right" id="bt_thermostatbeRefresh"><i class="fas fa-sync"></i> {{Évaluer maintenant}}</a>
+						<a class="btn btn-default btn-xs pull-right" id="bt_thermostatbeBoost" style="margin-right:6px;"><i class="fas fa-rocket"></i> <span>{{Boost}}</span></a>
 					</legend>
 					<div id="div_thermostatbeStatus" class="well well-sm">{{Enregistrez le thermostat pour voir sa première décision.}}</div>
 				</div>
@@ -199,6 +220,9 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 			<!-- ========================================== APPAREILS ========================================== -->
 			<div role="tabpanel" class="tab-pane" id="devicetab">
 				<br>
+				<div class="alert alert-info" style="margin:5px 5px 10px 5px;">
+					{{Les boutons « Essai » commandent réellement l'appareil, avec les commandes enregistrées : sauvegardez d'abord. Pendant 2 minutes, le thermostat laisse faire ; ensuite, il remet chaque appareil dans l'état qu'il a décidé.}}
+				</div>
 				<div class="col-lg-6">
 					<form class="form-horizontal">
 						<fieldset>
@@ -212,6 +236,17 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 							<div class="form-group">
 								<div class="col-sm-11 col-sm-offset-1">
 									<span class="help-block" style="margin:0;">{{Conseil : réglez l'« Auto OFF » du Shelly à 15 minutes. Le thermostat lui renvoie l'ordre toutes les 5 minutes pendant la chauffe : si Jeedom s'arrête, la chaudière s'éteint d'elle-même.}}</span>
+								</div>
+							</div>
+							<?php
+							thermostatbeNumber('boiler_power', '{{Consommation en marche}}', 'kW',
+								'', '{{Facultatif, pour le coût du jour : la puissance gaz consommée brûleur allumé (sur la plaque de la chaudière). Multipliée par le prix du gaz.}}');
+							?>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Essai}}</label>
+								<div class="col-sm-8">
+									<a class="btn btn-default btn-sm tbTest" data-device="boiler" data-do="on"><i class="fas fa-fire"></i> {{Allumer}}</a>
+									<a class="btn btn-default btn-sm tbTest" data-device="boiler" data-do="off"><i class="fas fa-power-off"></i> {{Éteindre}}</a>
 								</div>
 							</div>
 						</fieldset>
@@ -257,7 +292,19 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 								<label class="col-sm-4 control-label">{{Corriger la télécommande}}</label>
 								<div class="col-sm-7">
 									<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="ac_enforce" checked>
-									<span class="help-block" style="margin:0;">{{Coché : si l'état remonté contredit le thermostat, l'ordre est renvoyé — c'est ce qui rattrape une commande perdue. Décoché : quelqu'un peut allumer ou éteindre la clim à la télécommande sans que le thermostat la remette dans son état 5 minutes plus tard ; l'écart est seulement noté dans le journal.}}</span>
+									<span class="help-block tbAcEnforceHelp" style="margin:0;">{{Coché : si l'état remonté contredit le thermostat, l'ordre est renvoyé — c'est ce qui rattrape une commande perdue. Décoché : quelqu'un peut allumer ou éteindre la clim à la télécommande sans que le thermostat la remette dans son état 5 minutes plus tard ; l'écart est seulement noté dans le journal.}}</span>
+								</div>
+							</div>
+							<?php
+							thermostatbeNumber('ac_power', '{{Consommation moyenne}}', 'kW',
+								'', '{{Facultatif, pour le coût du jour : la puissance électrique moyenne de la clim en marche. Un compteur ou la fiche technique la donnent ; environ un tiers de sa puissance de chauffe.}}');
+							?>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Essai}}</label>
+								<div class="col-sm-8">
+									<a class="btn btn-default btn-sm tbTest" data-device="ac" data-do="heat"><i class="fas fa-fire"></i> {{Chaud}}</a>
+									<a class="btn btn-default btn-sm tbTest" data-device="ac" data-do="cool"><i class="fas fa-snowflake"></i> {{Froid}}</a>
+									<a class="btn btn-default btn-sm tbTest" data-device="ac" data-do="off"><i class="fas fa-power-off"></i> {{Arrêt}}</a>
 								</div>
 							</div>
 						</fieldset>
@@ -328,13 +375,21 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 								<label class="col-sm-5 control-label">{{Préréglage}}</label>
 								<div class="col-sm-4">
 									<select class="form-control tbRuntime" data-key="preset">
-										<option value="manual" disabled>{{Manuel}}</option>
+										<option value="manual">{{Manuel}}</option>
 										<option value="comfort">{{Confort}}</option>
 										<option value="eco">{{Éco}}</option>
 										<option value="away">{{Absent}}</option>
 									</select>
 								</div>
 							</div>
+						</fieldset>
+						<fieldset>
+							<legend><i class="fas fa-rocket"></i> {{Boost}}</legend>
+							<?php
+							thermostatbeNumber('boost_delta', '{{Décalage de consigne}}', '°C', '2',
+								'{{Ajouté à la consigne de chauffe, retiré de celle de froid, le temps du boost. Le boost ne passe outre ni la saison, ni les conditions, ni la sécurité.}}');
+							thermostatbeNumber('boost_minutes', '{{Durée}}', 'min', '60');
+							?>
 						</fieldset>
 						<fieldset>
 							<legend><i class="fas fa-thermometer-three-quarters"></i> {{Consignes}}</legend>
@@ -409,6 +464,32 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 							?>
 						</fieldset>
 						<fieldset>
+							<legend><i class="fas fa-solar-panel"></i> {{Priorité au surplus solaire (source Auto)}}</legend>
+							<div class="form-group">
+								<label class="col-sm-5 control-label">{{Activer}}</label>
+								<div class="col-sm-6">
+									<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="solar_enable">
+									<span class="help-block" style="margin:0;">{{Désactivé par défaut. Quand les panneaux exportent, la clim chauffe au lieu de la chaudière : de l'électricité revendue presque rien chauffe la maison.}}</span>
+								</div>
+							</div>
+							<?php
+							thermostatbeCmdField('solar_cmd', '{{Puissance au compteur}}', 'info', false,
+								'{{En watts, positive quand la maison importe du réseau, négative quand elle exporte — la puissance active du compteur P1 HomeWizard, par exemple.}}');
+							?>
+							<div class="form-group">
+								<label class="col-sm-5 control-label">{{Positive = export}}</label>
+								<div class="col-sm-6">
+									<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="solar_invert">
+									<span class="help-block" style="margin:0;">{{Cochez si votre mesure est positive quand la maison exporte.}}</span>
+								</div>
+							</div>
+							<?php
+							thermostatbeNumber('solar_export_min', '{{Démarrer la clim à partir de}}', '{{W exportés}}', '800');
+							thermostatbeNumber('solar_import_max', '{{La garder tant qu\'on importe moins de}}', 'W', '300',
+								'{{La clim en marche consomme le surplus qui l\'a fait démarrer : ce second seuil évite qu\'elle s\'arrête à la minute suivante.}}');
+							?>
+						</fieldset>
+						<fieldset>
 							<legend><i class="fas fa-shield-alt"></i> {{Protections}}</legend>
 							<?php
 							thermostatbeNumber('boiler_min_on', '{{Chaudière : marche minimale}}', 'min', '5');
@@ -424,6 +505,51 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 						</fieldset>
 					</form>
 				</div>
+			</div>
+
+			<!-- ========================================== PROGRAMMATION ========================================== -->
+			<div role="tabpanel" class="tab-pane" id="scheduletab">
+				<br>
+				<div class="alert alert-info" style="margin:5px 5px 10px 5px;">
+					{{Chaque plage change de préréglage à son heure, les jours cochés : Confort à 6 h 30 en semaine, Éco à 22 h 30 tous les jours… Entre deux plages, ce que vous réglez à la main tient jusqu'au changement suivant. Une plage manquée de plus de 15 minutes (Jeedom arrêté) n'est pas rattrapée. Les consignes des préréglages se règlent dans l'onglet « Réglages ».}}
+				</div>
+				<div style="margin:0 0 10px 5px;">
+					<label class="checkbox-inline"><input type="checkbox" id="cb_thermostatbeSchedule"> {{Programmation active}}</label>
+					<span class="text-muted" style="margin-left:10px;">{{appliqué immédiatement — aussi par les commandes « Activer / Suspendre la programmation »}}</span>
+					<span id="span_thermostatbeNextSchedule" class="label label-info" style="margin-left:10px;"></span>
+				</div>
+				<a class="btn btn-default btn-sm" id="bt_thermostatbeAddSlot" style="margin:0 0 10px 5px;"><i class="fas fa-plus-circle"></i> {{Ajouter une plage}}</a>
+				<table class="table table-bordered table-condensed" id="table_thermostatbeSchedule">
+					<thead>
+						<tr>
+							<th style="width:70px;">{{Active}}</th>
+							<th style="width:110px;">{{Heure}}</th>
+							<th>{{Jours}}</th>
+							<th style="width:22%;">{{Préréglage}}</th>
+							<th style="width:40px;"></th>
+						</tr>
+					</thead>
+					<tbody></tbody>
+				</table>
+				<template id="tpl_thermostatbeSlot">
+					<tr class="tbSlot">
+						<td><input type="checkbox" class="tbSlotAttr" data-key="enable" checked></td>
+						<td><input type="time" class="form-control input-sm tbSlotAttr" data-key="time" value="06:30"></td>
+						<td>
+							<?php foreach (array(1 => '{{Lun}}', 2 => '{{Mar}}', 3 => '{{Mer}}', 4 => '{{Jeu}}', 5 => '{{Ven}}', 6 => '{{Sam}}', 7 => '{{Dim}}') as $day => $label) { ?>
+								<label class="checkbox-inline" style="margin-right:6px;"><input type="checkbox" class="tbSlotDay" data-day="<?php echo $day; ?>" checked> <?php echo $label; ?></label>
+							<?php } ?>
+						</td>
+						<td>
+							<select class="form-control input-sm tbSlotAttr" data-key="preset">
+								<option value="comfort">{{Confort}}</option>
+								<option value="eco">{{Éco}}</option>
+								<option value="away">{{Absent}}</option>
+							</select>
+						</td>
+						<td><a class="btn btn-danger btn-sm tbSlotRemove" title="{{Supprimer}}"><i class="fas fa-minus-circle"></i></a></td>
+					</tr>
+				</template>
 			</div>
 
 			<!-- ========================================== CONDITIONS ========================================== -->
