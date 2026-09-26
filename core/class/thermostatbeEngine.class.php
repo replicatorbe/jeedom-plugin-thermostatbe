@@ -122,6 +122,8 @@ class thermostatbeEngine {
         'cop_at_minus7'       => 2.0,
         'cost_margin'         => 10,
         'cool_min_outdoor'    => null,
+        'ac_fixed_heat'       => null,
+        'ac_fixed_cool'       => null,
         'window_delay'        => 60,
         'boost_delta'         => 2.0,
         'boost_minutes'       => 60,
@@ -156,6 +158,8 @@ class thermostatbeEngine {
         'cop_at_minus7'       => array(1, 8),
         'cost_margin'         => array(0, 50),
         'cool_min_outdoor'    => array(-10, 40),
+        'ac_fixed_heat'       => array(10, 35),
+        'ac_fixed_cool'       => array(10, 35),
         'window_delay'        => array(0, 3600),
         'boost_delta'         => array(0.5, 5),
         'boost_minutes'       => array(5, 480),
@@ -636,9 +640,22 @@ class thermostatbeEngine {
                  * 26 °C pendant ses dernières minutes : elle garde la sienne. */
                 $result['ac_setpoint'] = (float) $state['ac_setpoint'];
             } else {
-                $sp = ($need['setpoint'] !== null) ? $need['setpoint'] : $settings['heat_setpoint'];
-                $offset = ($final == self::HEAT_AC) ? $settings['ac_heat_offset'] : $settings['ac_cool_offset'];
-                $result['ac_setpoint'] = self::acSetpoint($settings, $sp + $offset);
+                /*
+                 * Consigne fixe, si l'utilisateur en a réglé une : 30 °C en
+                 * chaud, 16 °C en froid. C'est la façon de piloter une clim
+                 * par une sonde déportée : sa propre sonde, près du plafond
+                 * et dans son flux d'air, la croit à température trop tôt et
+                 * la coupe. Poussée au bout de sa plage, elle tourne tant que
+                 * le thermostat le veut, et c'est lui qui l'arrête.
+                 */
+                $fixed = ($final == self::HEAT_AC) ? $settings['ac_fixed_heat'] : $settings['ac_fixed_cool'];
+                if ($fixed !== null) {
+                    $result['ac_setpoint'] = self::acSetpoint($settings, $fixed);
+                } else {
+                    $sp = ($need['setpoint'] !== null) ? $need['setpoint'] : $settings['heat_setpoint'];
+                    $offset = ($final == self::HEAT_AC) ? $settings['ac_heat_offset'] : $settings['ac_cool_offset'];
+                    $result['ac_setpoint'] = self::acSetpoint($settings, $sp + $offset);
+                }
             }
         }
         $state['ac_setpoint'] = $result['ac_setpoint'];

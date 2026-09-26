@@ -76,6 +76,15 @@ jamais relancée à l'aveugle, car elle bipe à chaque ordre.
 Tant que la clim n'est pas configurée, le thermostat chauffe à la chaudière et
 ne refroidit pas.
 
+**Consigne envoyée à la clim** (onglet Réglages, Protections) : par défaut, la
+consigne du thermostat plus un décalage (+1 °C en chaud, −1 °C en froid). Avec
+une **consigne fixe** — facultative, par exemple 30 °C en chaud et 16 °C en
+froid —, la clim reçoit toujours cette valeur, tourne à fond et c'est le
+thermostat, sur ses propres sondes, qui l'arrête. C'est le réglage d'une clim
+pilotée par sonde déportée : sa propre sonde, près du plafond, la couperait
+trop tôt. La valeur reste bornée par la plage de la clim (16 à 30 °C par
+défaut).
+
 **Essai** : les boutons de chaque appareil l'allument, l'éteignent ou changent
 son mode avec les commandes enregistrées — c'est la façon de vérifier qu'on a
 choisi les bonnes. Le thermostat laisse faire 2 minutes, puis remet chaque

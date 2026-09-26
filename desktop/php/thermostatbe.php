@@ -497,8 +497,12 @@ function thermostatbeNumber($_key, $_label, $_unit, $_placeholder, $_help = '') 
 							thermostatbeNumber('ac_min_on', '{{Clim : marche minimale}}', 'min', '15');
 							thermostatbeNumber('ac_min_off', '{{Clim : arrêt minimal}}', 'min', '10');
 							thermostatbeNumber('ac_mode_delay', '{{Clim : arrêt avant changement de mode}}', 'min', '10');
+							thermostatbeNumber('ac_fixed_heat', '{{Clim : consigne fixe en chaud}}', '°C', '30',
+								'{{Facultatif. Pour piloter la clim par les sondes du thermostat : elle reçoit toujours cette consigne en chaud (30 °C), tourne tant que le thermostat le veut, et c\'est lui qui l\'arrête. Sans cela, sa propre sonde, près du plafond, la coupe trop tôt. Vide : consigne du thermostat plus le décalage ci-dessous.}}');
+							thermostatbeNumber('ac_fixed_cool', '{{Clim : consigne fixe en froid}}', '°C', '16',
+								'{{Facultatif. Même principe en froid : 16 °C, la clim refroidit à fond et le thermostat l\'arrête à sa consigne. Vide : consigne du thermostat plus le décalage ci-dessous.}}');
 							thermostatbeNumber('ac_heat_offset', '{{Clim : décalage de consigne en chaud}}', '°C', '1',
-								'{{Ajouté à la consigne envoyée à la clim. Sa sonde est en hauteur, dans l\'air chaud : sans décalage, elle s\'arrête avant que la pièce soit à température.}}');
+								'{{Ajouté à la consigne envoyée à la clim quand aucune consigne fixe n\'est réglée. Sa sonde est en hauteur, dans l\'air chaud : sans décalage, elle s\'arrête avant que la pièce soit à température.}}');
 							thermostatbeNumber('ac_cool_offset', '{{Clim : décalage de consigne en froid}}', '°C', '−1');
 							thermostatbeNumber('window_delay', '{{Pause après fenêtre ouverte}}', 's', '60');
 							?>

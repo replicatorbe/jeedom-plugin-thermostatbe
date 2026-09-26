@@ -412,6 +412,21 @@ verifie('vendredi 23:00, suivante : samedi 08:00', date('Y-m-d H:i', $suivante['
 $off = thermostatbeSchedule::cleanSlots(array(array('enable' => 0, 'time' => '06:30', 'days' => array(1), 'preset' => 'eco')));
 verifie('plage désactivée : jamais jouée', thermostatbeSchedule::due($off, 0, $lundi), null);
 
+/* ----------------------------------------------------------------- 16 ---
+ * Consigne fixe de la clim, pour une régulation par sonde déportée. */
+echo "\nConsigne fixe de la clim\n";
+$m = new Maison(reglages(array('mode' => 'heat', 'source' => 'ac', 'ac_fixed_heat' => 30, 'ac_fixed_cool' => 16)));
+verifie('chaud : la clim reçoit 30 °C', ($m->passe(19.0, 10.0, null, 10.0) == 'heat_ac') ? $m->dernier['ac_setpoint'] : null, 30.0);
+$m = new Maison(reglages(array('mode' => 'cool', 'ac_fixed_heat' => 30, 'ac_fixed_cool' => 16)));
+verifie('froid : la clim reçoit 16 °C', ($m->passe(27.0, 30.0, null, 25.0) == 'cool_ac') ? $m->dernier['ac_setpoint'] : null, 16.0);
+$m = new Maison(reglages(array('mode' => 'cool', 'ac_fixed_heat' => 30)));
+verifie('froid sans consigne fixe : consigne − 1 comme avant', ($m->passe(27.0, 30.0, null, 25.0) == 'cool_ac') ? $m->dernier['ac_setpoint'] : null, 24.0);
+verifie('champ vide : pas de consigne fixe', thermostatbeEngine::cleanSettings(array('ac_fixed_heat' => ''))['ac_fixed_heat'], null);
+$m = new Maison(reglages(array('mode' => 'heat', 'source' => 'ac', 'ac_fixed_heat' => 30)));
+$m->passe(19.0, 10.0, null, 10.0);
+$m->avance(20);
+verifie('la clim tourne à 30 °C, le thermostat l\'arrête à 20,5 °C', $m->passe(20.6, 10.0), 'idle');
+
 /* ----------------------------------------------------------------- 11 ---
  * Textes. */
 echo "\nTextes\n";

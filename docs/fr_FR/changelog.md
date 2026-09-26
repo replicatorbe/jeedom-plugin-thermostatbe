@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4
+
+- Consigne fixe facultative envoyée à la clim, en chaud et en froid (par
+  exemple 30 °C et 16 °C) : la clim tourne à fond et le thermostat l'arrête sur
+  ses propres sondes, au lieu de la laisser se couper sur sa sonde à elle.
+
 ## 0.3
 
 - **Tuile du tableau de bord** : température, état, deux consignes réglables au
