@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Le type générique **THERMOSTAT_STATE** passe de « En marche » à « Chauffe » :
+  Google Home (Matter) et les applications mobiles affichaient « chauffe en
+  cours » quand la clim refroidissait.
+
 ## 0.5
 
 - **Autre pilote pour la chaudière** : un relais qui change d'état sans ordre

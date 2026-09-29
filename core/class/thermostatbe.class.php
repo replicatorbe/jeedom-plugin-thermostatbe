@@ -313,11 +313,17 @@ class thermostatbe extends eqLogic {
                   'type' => 'info', 'subType' => 'string', 'generic' => 'THERMOSTAT_STATE_NAME', 'visible' => 1),
             array('logicalId' => 'reason', 'name' => __('Raison', __FILE__),
                   'type' => 'info', 'subType' => 'string', 'generic' => '', 'visible' => 1),
+            /* THERMOSTAT_STATE est porté par « Chauffe », pas par « En marche ».
+             * Le cœur n'a pas de type pour « refroidit » : ceux qui lisent
+             * THERMOSTAT_STATE (Google Home par Matter, applications mobiles)
+             * l'affichent comme « chauffe en cours ». Sur « En marche », qui vaut
+             * aussi 1 quand la clim refroidit, un salon climatisé en juillet
+             * apparaissait en train de chauffer. */
             array('logicalId' => 'active', 'name' => __('En marche', __FILE__),
-                  'type' => 'info', 'subType' => 'binary', 'generic' => 'THERMOSTAT_STATE',
+                  'type' => 'info', 'subType' => 'binary', 'generic' => '',
                   'visible' => 0, 'historized' => 1),
             array('logicalId' => 'heating', 'name' => __('Chauffe', __FILE__),
-                  'type' => 'info', 'subType' => 'binary', 'generic' => '', 'visible' => 0, 'historized' => 1),
+                  'type' => 'info', 'subType' => 'binary', 'generic' => 'THERMOSTAT_STATE', 'visible' => 0, 'historized' => 1),
             array('logicalId' => 'cooling', 'name' => __('Refroidit', __FILE__),
                   'type' => 'info', 'subType' => 'binary', 'generic' => '', 'visible' => 0, 'historized' => 1),
             array('logicalId' => 'device', 'name' => __('Appareil en marche', __FILE__),
