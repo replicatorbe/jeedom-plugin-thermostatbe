@@ -1819,21 +1819,38 @@ class thermostatbeCmd extends cmd {
 
     public function execute($_options = array()) {
         $eqLogic = $this->getEqLogic();
-        switch ($this->getLogicalId()) {
+        $logicalId = $this->getLogicalId();
+        /* Les widgets mobiles (JeedomConnect) déclenchent parfois une action
+         * avant d'avoir reçu la valeur courante : on ignore ce tir à blanc
+         * plutôt que de lever « Consigne illisible » ou « Mode inconnu ». */
+        $payloadKeys = array(
+            'set_heat_setpoint' => 'slider',
+            'set_cool_setpoint' => 'slider',
+            'set_mode'          => 'select',
+            'set_source'        => 'select',
+            'set_preset'        => 'select',
+        );
+        if (isset($payloadKeys[$logicalId])) {
+            $key = $payloadKeys[$logicalId];
+            if (!isset($_options[$key]) || $_options[$key] === '') {
+                return;
+            }
+        }
+        switch ($logicalId) {
             case 'set_heat_setpoint':
-                $eqLogic->setRuntime('heat_setpoint', isset($_options['slider']) ? $_options['slider'] : null);
+                $eqLogic->setRuntime('heat_setpoint', $_options['slider']);
                 return;
             case 'set_cool_setpoint':
-                $eqLogic->setRuntime('cool_setpoint', isset($_options['slider']) ? $_options['slider'] : null);
+                $eqLogic->setRuntime('cool_setpoint', $_options['slider']);
                 return;
             case 'set_mode':
-                $eqLogic->setRuntime('mode', isset($_options['select']) ? $_options['select'] : '');
+                $eqLogic->setRuntime('mode', $_options['select']);
                 return;
             case 'set_source':
-                $eqLogic->setRuntime('source', isset($_options['select']) ? $_options['select'] : '');
+                $eqLogic->setRuntime('source', $_options['select']);
                 return;
             case 'set_preset':
-                $eqLogic->setRuntime('preset', isset($_options['select']) ? $_options['select'] : '');
+                $eqLogic->setRuntime('preset', $_options['select']);
                 return;
             case 'boost_on':
                 $eqLogic->startBoost();
