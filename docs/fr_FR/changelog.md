@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2
+
+- **Fin du boost**, **Prochain changement**, **Conditions actives** et
+  **Alerte sondes** ne sont plus réécrites à chaque minute quand elles restent
+  vides : le coeur de Jeedom compte une ancienne valeur vide comme un
+  changement, d'où près de 6 000 événements inutiles par jour (date de valeur
+  avancée, déclencheurs de scénarios évalués, tuile rafraîchie). Le passage
+  d'une valeur à vide est toujours publié.
+
 ## 0.5.1
 
 - Le type générique **THERMOSTAT_STATE** passe de « En marche » à « Chauffe » :

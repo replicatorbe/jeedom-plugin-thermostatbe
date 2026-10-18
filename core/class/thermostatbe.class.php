@@ -1245,9 +1245,9 @@ class thermostatbe extends eqLogic {
         $this->checkAndUpdateCmd('window', ($_windowFor !== null) ? 1 : 0);
         $boost = $this->boostUntil();
         $this->checkAndUpdateCmd('boost', ($boost > 0) ? 1 : 0);
-        $this->checkAndUpdateCmd('boost_until', ($boost > 0) ? date('H:i', $boost) : '');
+        $this->publishCmd('boost_until', ($boost > 0) ? date('H:i', $boost) : '');
         $this->checkAndUpdateCmd('schedule', $this->scheduleEnabled() ? 1 : 0);
-        $this->checkAndUpdateCmd('next_schedule', $this->nextScheduleText());
+        $this->publishCmd('next_schedule', $this->nextScheduleText());
         $this->checkAndUpdateCmd('runtime_boiler', round($_usage['boiler']));
         $this->checkAndUpdateCmd('runtime_ac_heat', round($_usage['ac_heat']));
         $this->checkAndUpdateCmd('runtime_ac_cool', round($_usage['ac_cool']));
@@ -1259,10 +1259,31 @@ class thermostatbe extends eqLogic {
         if ($_decision['setpoint'] !== null) {
             $this->checkAndUpdateCmd('effective_setpoint', $_decision['setpoint']);
         }
-        $this->checkAndUpdateCmd('conditions', implode(', ', array_map(function ($_condition) {
+        $this->publishCmd('conditions', implode(', ', array_map(function ($_condition) {
             return $_condition['name'];
         }, $_decision['conditions'])));
-        $this->checkAndUpdateCmd('sensor_alert', self::sensorAlert($_decision['sensors']));
+        $this->publishCmd('sensor_alert', self::sensorAlert($_decision['sensors']));
+    }
+
+    /*
+     * checkAndUpdateCmd() en évitant l'évènement inutile : le coeur traite
+     * toujours une ancienne valeur vide comme un changement. Fin du boost,
+     * prochain changement, conditions actives et alerte sondes, vides la
+     * plupart du temps, émettraient sinon un évènement à chaque cron
+     * (valueDate avancée, déclencheurs de scénarios évalués, tuile
+     * rafraîchie). Le passage d'une valeur à vide, lui, passe toujours.
+     *
+     * Surtout pas nommée setCmd() : à l'enregistrement, utils::a2o() appelle
+     * « set » + chaque clé reçue, et la page envoie toujours une clé « cmd ».
+     */
+    private function publishCmd($_logicalId, $_value) {
+        if ($_value === '') {
+            $cmd = $this->getCmd('info', $_logicalId);
+            if (is_object($cmd) && $cmd->execCmd() === '') {
+                return;
+            }
+        }
+        $this->checkAndUpdateCmd($_logicalId, $_value);
     }
 
     /* « 1 sonde muette sur 3 », ou rien quand toutes répondent. */
