@@ -343,15 +343,15 @@ class thermostatbe extends eqLogic {
             array('logicalId' => 'boost_until', 'name' => __('Fin du boost', __FILE__),
                   'type' => 'info', 'subType' => 'string', 'generic' => '', 'visible' => 0),
             array('logicalId' => 'boost_on', 'name' => __('Boost', __FILE__),
-                  'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 1),
+                  'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 1, 'value' => 'boost'),
             array('logicalId' => 'boost_off', 'name' => __('Arrêter le boost', __FILE__),
-                  'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 0),
+                  'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 0, 'value' => 'boost'),
             array('logicalId' => 'schedule', 'name' => __('Programmation active', __FILE__),
                   'type' => 'info', 'subType' => 'binary', 'generic' => '', 'visible' => 0),
             array('logicalId' => 'schedule_on', 'name' => __('Activer la programmation', __FILE__),
-                  'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 0),
+                  'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 0, 'value' => 'schedule'),
             array('logicalId' => 'schedule_off', 'name' => __('Suspendre la programmation', __FILE__),
-                  'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 0),
+                  'type' => 'action', 'subType' => 'other', 'generic' => '', 'visible' => 0, 'value' => 'schedule'),
             array('logicalId' => 'next_schedule', 'name' => __('Prochain changement', __FILE__),
                   'type' => 'info', 'subType' => 'string', 'generic' => '', 'visible' => 0),
             array('logicalId' => 'runtime_boiler', 'name' => __('Chaudière du jour', __FILE__),
@@ -411,8 +411,9 @@ class thermostatbe extends eqLogic {
         }
 
         /* Le lien action → info : sans lui, le curseur revient sous le doigt à
-         * l'ancienne consigne, et la liste des modes n'affiche pas le mode en
-         * cours. */
+         * l'ancienne consigne, la liste des modes n'affiche pas le mode en
+         * cours, et l'appli mobile ne sait pas si le boost ou la programmation
+         * tournent. */
         foreach ($definitions as $definition) {
             if (!isset($definition['value'])) {
                 continue;

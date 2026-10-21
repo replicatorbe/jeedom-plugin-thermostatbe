@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.3
+
+- **Boost** et **Arrêter le boost** sont liés à l'info « Boost actif »,
+  **Activer** et **Suspendre la programmation** à « Programmation active » :
+  l'appli mobile et les widgets savent si le boost ou la programmation
+  tournent. Les commandes existantes sont rattachées au prochain
+  enregistrement de l'équipement.
+
 ## 0.5.2
 
 - **Fin du boost**, **Prochain changement**, **Conditions actives** et
