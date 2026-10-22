@@ -1503,8 +1503,9 @@ class thermostatbe extends eqLogic {
             $this->sendAc(true, $acMode, $_decision['ac_setpoint'], $sent, $now);
         } elseif ($acOn && isset($sent['ac_setpoint']) && $sent['ac_setpoint'] != $_decision['ac_setpoint']) {
             /* La consigne a changé en cours de marche. */
-            $this->execAction($this->cmdId('ac_setpoint'), $_decision['ac_setpoint']);
-            $sent['ac_setpoint'] = $_decision['ac_setpoint'];
+            if ($this->execAction($this->cmdId('ac_setpoint'), $_decision['ac_setpoint'])) {
+                $sent['ac_setpoint'] = $_decision['ac_setpoint'];
+            }
         }
 
         /* 3. Les rappels : l'ordre en cours, renvoyé si l'appareil ne l'a pas
@@ -1522,11 +1523,16 @@ class thermostatbe extends eqLogic {
         return $this->cmdId('boiler_on') !== null && $this->cmdId('boiler_off') !== null;
     }
 
+    /* Un ordre n'est retenu comme envoyé que s'il est parti : sinon l'état
+     * envoyé est oublié, et le rappel de la minute suivante le renvoie. */
     private function sendBoiler($_on, &$_sent, $_now) {
         if (!$this->hasBoiler()) {
             return;
         }
-        $this->execAction($this->cmdId($_on ? 'boiler_on' : 'boiler_off'));
+        if (!$this->execAction($this->cmdId($_on ? 'boiler_on' : 'boiler_off'))) {
+            unset($_sent['boiler']);
+            return;
+        }
         $_sent['boiler'] = $_on ? 1 : 0;
         $_sent['boiler_at'] = $_now;
     }
@@ -1536,16 +1542,23 @@ class thermostatbe extends eqLogic {
             return;
         }
         if (!$_on) {
-            $this->execAction($this->cmdId('ac_off'));
+            if (!$this->execAction($this->cmdId('ac_off'))) {
+                unset($_sent['ac']);
+                return;
+            }
             $_sent['ac'] = 0;
             $_sent['ac_at'] = $_now;
             return;
         }
-        $this->execAction($this->cmdId('ac_on'));
         $modeKey = ($_mode == 'cool') ? 'ac_mode_cool' : 'ac_mode_heat';
-        $this->execAction($this->cmdId($modeKey), $this->getConfiguration($modeKey . '_value', ''));
-        if ($_setpoint !== null && $this->cmdId('ac_setpoint') !== null) {
-            $this->execAction($this->cmdId('ac_setpoint'), $_setpoint);
+        $ok = $this->execAction($this->cmdId('ac_on'))
+            && $this->execAction($this->cmdId($modeKey), $this->getConfiguration($modeKey . '_value', ''));
+        if ($ok && $_setpoint !== null && $this->cmdId('ac_setpoint') !== null) {
+            $ok = $this->execAction($this->cmdId('ac_setpoint'), $_setpoint);
+        }
+        if (!$ok) {
+            unset($_sent['ac']);
+            return;
         }
         $_sent['ac'] = 1;
         $_sent['ac_mode'] = $_mode;
